@@ -30,8 +30,8 @@ def _init_chat_table(cursor):
         CREATE TABLE IF NOT EXISTS chat_message (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT,
-            sender_pin TEXT,
-            receiver_pin TEXT,
+            sender_email TEXT,   -- CAMBIADO DE PIN A EMAIL
+            receiver_email TEXT, -- CAMBIADO DE PIN A EMAIL
             texto TEXT,
             file_path TEXT,
             file_type TEXT,
@@ -41,24 +41,27 @@ def _init_chat_table(cursor):
     ''')
     # Parche de seguridad para asegurar columnas en DBs existentes
     try:
-        cursor.execute("ALTER TABLE chat_message ADD COLUMN sender_pin TEXT")
+        cursor.execute("ALTER TABLE chat_message ADD COLUMN sender_email TEXT")
     except: pass
     try:
-        cursor.execute("ALTER TABLE chat_message ADD COLUMN receiver_pin TEXT")
+        cursor.execute("ALTER TABLE chat_message ADD COLUMN receiver_email TEXT")
     except: pass
     try:
         cursor.execute("ALTER TABLE chat_message ADD COLUMN is_read INTEGER DEFAULT 0")
     except: pass
+    
+    # MAGIA: Si había mensajes viejos usando el sistema de PINs, intentamos migrarlos al sistema de Emails
     try:
-        cursor.execute("UPDATE chat_message SET sender_pin = pin WHERE sender_pin IS NULL")
+        cursor.execute("UPDATE chat_message SET sender_email = sender_pin WHERE sender_email IS NULL AND sender_pin IS NOT NULL")
+        cursor.execute("UPDATE chat_message SET receiver_email = receiver_pin WHERE receiver_email IS NULL AND receiver_pin IS NOT NULL")
     except: pass
 
 # ==============================================================================
 # RUTAS DE CHAT
 # ==============================================================================
 
-@chat_bp.route('/api/<app_slug>/chat/<mi_pin>/<otro_pin>', methods=['GET'])
-def obtener_mensajes_privados(app_slug, mi_pin, otro_pin):
+@chat_bp.route('/api/<app_slug>/chat/<mi_email>/<otro_email>', methods=['GET'])
+def obtener_mensajes_privados(app_slug, mi_email, otro_email):
     db_path = get_chat_db_path(app_slug)
     if not os.path.exists(db_path):
         return jsonify([])
@@ -72,16 +75,16 @@ def obtener_mensajes_privados(app_slug, mi_pin, otro_pin):
         # Marcar como leídos los mensajes que recibo de la otra persona
         cursor.execute('''
             UPDATE chat_message SET is_read = 1 
-            WHERE receiver_pin = ? AND sender_pin = ? AND is_read = 0
-        ''', (mi_pin, otro_pin))
+            WHERE receiver_email = ? AND sender_email = ? AND is_read = 0
+        ''', (mi_email, otro_email))
         conn.commit()
 
         cursor.execute('''
             SELECT * FROM chat_message 
-            WHERE (sender_pin = ? AND receiver_pin = ?) 
-               OR (sender_pin = ? AND receiver_pin = ?)
+            WHERE (sender_email = ? AND receiver_email = ?) 
+               OR (sender_email = ? AND receiver_email = ?)
             ORDER BY created_at DESC LIMIT 100
-        ''', (mi_pin, otro_pin, otro_pin, mi_pin))
+        ''', (mi_email, otro_email, otro_email, mi_email))
         
         rows = cursor.fetchall()
         conn.close()
@@ -116,8 +119,8 @@ def enviar_mensaje(app_slug):
 
     try:
         nombre = request.form.get('nombre')
-        sender_pin = request.form.get('sender_pin')
-        receiver_pin = request.form.get('receiver_pin')
+        sender_email = request.form.get('sender_email')
+        receiver_email = request.form.get('receiver_email')
         texto = request.form.get('texto')
         
         file_url = None
@@ -143,9 +146,9 @@ def enviar_mensaje(app_slug):
         _init_chat_table(cursor)
         
         cursor.execute('''
-            INSERT INTO chat_message (nombre, sender_pin, receiver_pin, texto, file_path, file_type, is_read)
+            INSERT INTO chat_message (nombre, sender_email, receiver_email, texto, file_path, file_type, is_read)
             VALUES (?, ?, ?, ?, ?, ?, 0)
-        ''', (nombre, sender_pin, receiver_pin, texto, file_url, f_type))
+        ''', (nombre, sender_email, receiver_email, texto, file_url, f_type))
         
         conn.commit()
         conn.close()
@@ -154,8 +157,8 @@ def enviar_mensaje(app_slug):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@chat_bp.route('/api/<app_slug>/chat/unread/<mi_pin>', methods=['GET'])
-def notificaciones_globales(app_slug, mi_pin):
+@chat_bp.route('/api/<app_slug>/chat/unread/<mi_email>', methods=['GET'])
+def notificaciones_globales(app_slug, mi_email):
     """Devuelve la cantidad total de mensajes sin leer en toda la app"""
     db_path = get_chat_db_path(app_slug)
     if not os.path.exists(db_path): return jsonify({"total_unread": 0})
@@ -164,7 +167,7 @@ def notificaciones_globales(app_slug, mi_pin):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         _init_chat_table(cursor)
-        cursor.execute('SELECT COUNT(*) FROM chat_message WHERE receiver_pin = ? AND is_read = 0', (mi_pin,))
+        cursor.execute('SELECT COUNT(*) FROM chat_message WHERE receiver_email = ? AND is_read = 0', (mi_email,))
         total = cursor.fetchone()[0]
         conn.close()
         return jsonify({"total_unread": total})
@@ -199,16 +202,16 @@ def limpiar_chat(app_slug):
     db_path = get_chat_db_path(app_slug)
     try:
         data = request.get_json()
-        mi_pin = data.get('mi_pin')
-        otro_pin = data.get('otro_pin')
+        mi_email = data.get('mi_email')
+        otro_email = data.get('otro_email')
         
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute('''
             DELETE FROM chat_message 
-            WHERE (sender_pin = ? AND receiver_pin = ?) 
-               OR (sender_pin = ? AND receiver_pin = ?)
-        ''', (mi_pin, otro_pin, otro_pin, mi_pin))
+            WHERE (sender_email = ? AND receiver_email = ?) 
+               OR (sender_email = ? AND receiver_email = ?)
+        ''', (mi_email, otro_email, otro_email, mi_email))
         conn.commit()
         conn.close()
         return jsonify({"status": "ok"})

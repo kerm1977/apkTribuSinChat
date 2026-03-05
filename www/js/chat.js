@@ -1,118 +1,161 @@
 /**
- * chat.js - Lógica para el Enjambre de Chat Privado (1 a 1)
+ * chat.js - Lógica para el Enjambre de Chat Privado y Grupal (Basado en Email)
  */
 
 // 1. SOLUCIÓN CRÍTICA: Apuntamos al dominio correcto dinámicamente.
-// Ya no usamos 'alatir' fijo. Usamos la API_URL que configuró tu asistente Node.js.
 const BASE_API = typeof API_URL !== 'undefined' ? API_URL : "https://kenth1977.pythonanywhere.com/api/Geeko";
 
-// Función de ayuda para obtener el PIN del usuario actual desde localStorage
-function obtenerMiPin() {
-    let pin = localStorage.getItem('tribu_pin');
-    if (!pin) {
-        try {
-            const u = JSON.parse(localStorage.getItem('usuarioActual'));
-            pin = u ? u.pin : null;
-        } catch(e) {}
+// Función de ayuda para obtener el CORREO del usuario actual desde localStorage
+function obtenerMiCorreo() {
+    try {
+        const u = JSON.parse(localStorage.getItem('usuarioActual'));
+        return u ? u.email : null; // Ahora usamos estrictamente el correo
+    } catch(e) {
+        return null;
     }
-    return pin;
 }
 
 function obtenerMiNombre() {
-    let nombre = localStorage.getItem('tribu_nombre');
-    if (!nombre) {
-        try {
-            const u = JSON.parse(localStorage.getItem('usuarioActual'));
-            nombre = u ? u.nombre : 'Usuario';
-        } catch(e) {}
+    try {
+        const u = JSON.parse(localStorage.getItem('usuarioActual'));
+        return u ? u.nombre : 'Usuario';
+    } catch(e) {
+        return 'Usuario';
     }
-    return nombre || 'Usuario';
 }
 
 window.ChatManager = {
-    chatActivoPin: null,   // Guarda el PIN de la persona con la que estamos hablando
+    chatActivoCorreo: null,   // Guarda el Correo de la persona o 'GRUPO_LOCAL'
     chatActivoNombre: null,
     mensajesCacheados: [], // Guarda la conversación actual para poder Exportarla a TXT
 
     // ==========================================
-    // NUEVO: GESTIÓN DE BLOQUEOS (Invisibilidad)
+    // ALMACENAMIENTO LOCAL (Invisibilidad, Fijados y Grupos)
     // ==========================================
     obtenerBloqueados() {
-        const miPin = obtenerMiPin();
-        try {
-            const data = localStorage.getItem(`tribu_bloqueados_${miPin}`);
-            return data ? JSON.parse(data) : [];
-        } catch(e) { return []; }
+        try { return JSON.parse(localStorage.getItem(`tribu_bloqueados_${obtenerMiCorreo()}`)) || []; }
+        catch(e) { return []; }
     },
-
     guardarBloqueados(lista) {
-        const miPin = obtenerMiPin();
-        localStorage.setItem(`tribu_bloqueados_${miPin}`, JSON.stringify(lista));
+        localStorage.setItem(`tribu_bloqueados_${obtenerMiCorreo()}`, JSON.stringify(lista));
+    },
+    obtenerFijados() {
+        try { return JSON.parse(localStorage.getItem(`tribu_fijados_${obtenerMiCorreo()}`)) || []; }
+        catch(e) { return []; }
+    },
+    guardarFijados(lista) {
+        localStorage.setItem(`tribu_fijados_${obtenerMiCorreo()}`, JSON.stringify(lista));
+    },
+    obtenerGrupo() {
+        try { return JSON.parse(localStorage.getItem(`tribu_grupo_${obtenerMiCorreo()}`)) || []; }
+        catch(e) { return []; }
+    },
+    guardarGrupo(lista) {
+        localStorage.setItem(`tribu_grupo_${obtenerMiCorreo()}`, JSON.stringify(lista));
     },
 
-    // 1. OBTENER LISTA DE CONTACTOS (Ahora con filtro de invisibilidad)
+    // 1. OBTENER LISTA DE CONTACTOS
     async obtenerContactos(mostrarTodos = false) {
-        const miPin = obtenerMiPin();
-        if (!miPin) return [];
+        const miCorreo = obtenerMiCorreo();
+        if (!miCorreo) return [];
         try {
-            const res = await fetch(`${BASE_API}/contactos/${miPin}`);
+            const res = await fetch(`${BASE_API}/contactos/${miCorreo}`);
             const data = await res.json();
             let contactos = data.contactos || [];
 
-            // 🔥 MAGIA: Filtramos a los bloqueados para que no aparezcan en la lista principal
+            // Filtramos a los bloqueados para que no aparezcan en la lista principal
             if (!mostrarTodos) {
                 const bloqueados = this.obtenerBloqueados();
-                contactos = contactos.filter(c => !bloqueados.includes(c.pin));
+                contactos = contactos.filter(c => !bloqueados.includes(c.email));
             }
-
             return contactos;
         } catch (e) { return []; }
     },
 
-    // 2. OBTENER MENSAJES DE UN CHAT PRIVADO
+    // 2. OBTENER MENSAJES (Ahora soporta modo GRUPO fusionando mensajes)
     async obtenerMensajesPrivados() {
-        const miPin = obtenerMiPin();
-        if (!miPin || !this.chatActivoPin) return [];
+        const miCorreo = obtenerMiCorreo();
+        if (!miCorreo || !this.chatActivoCorreo) return [];
+        
+        // MODO GRUPO: Fusionar chats de múltiples usuarios
+        if (this.chatActivoCorreo === 'GRUPO_LOCAL') {
+            const correosGrupo = this.obtenerGrupo();
+            if (correosGrupo.length === 0) return [];
+            try {
+                const promesas = correosGrupo.map(correo => fetch(`${BASE_API}/chat/${miCorreo}/${correo}`).then(r => r.json()));
+                const resultados = await Promise.all(promesas);
+                
+                let mensajesCombinados = [];
+                resultados.forEach(arr => { if(Array.isArray(arr)) mensajesCombinados = mensajesCombinados.concat(arr); });
+                
+                // Eliminar duplicados (por si acaso se envió a varios y el backend lo repite)
+                const unicos = {};
+                mensajesCombinados.forEach(m => unicos[m.id] = m);
+                mensajesCombinados = Object.values(unicos);
+                
+                // Ordenar por ID ascendente (más viejo a más nuevo) para mantener línea de tiempo real
+                mensajesCombinados.sort((a, b) => a.id - b.id);
+                
+                this.mensajesCacheados = mensajesCombinados;
+                return mensajesCombinados;
+            } catch(e) { return []; }
+        }
+
+        // MODO NORMAL: Chat 1 a 1
         try {
-            const res = await fetch(`${BASE_API}/chat/${miPin}/${this.chatActivoPin}`);
+            const res = await fetch(`${BASE_API}/chat/${miCorreo}/${this.chatActivoCorreo}`);
             const mensajes = await res.json();
-            this.mensajesCacheados = mensajes; // Lo guardamos para el TXT
+            this.mensajesCacheados = mensajes;
             return mensajes;
         } catch (e) { return []; }
     },
 
-    // 3. ENVIAR MENSAJE
+    // 3. ENVIAR MENSAJE (Ahora soporta envío en ráfaga al GRUPO)
     async enviarMensaje(texto, archivo = null) {
         const miNombre = obtenerMiNombre();
-        const miPin = obtenerMiPin();
+        const miCorreo = obtenerMiCorreo();
 
-        if (!miPin || !this.chatActivoPin) return { error: "No hay chat activo" };
+        if (!miCorreo || !this.chatActivoCorreo) return { error: "No hay chat activo" };
 
+        // MODO GRUPO: Enviar a todos los miembros silenciosamente
+        if (this.chatActivoCorreo === 'GRUPO_LOCAL') {
+            const correosGrupo = this.obtenerGrupo();
+            const promesas = correosGrupo.map(correo => {
+                const formData = new FormData();
+                formData.append('nombre', miNombre);
+                formData.append('sender_email', miCorreo);
+                formData.append('receiver_email', correo);
+                formData.append('texto', texto);
+                if (archivo) formData.append('file', archivo);
+                return fetch(`${BASE_API}/chat/enviar`, { method: 'POST', body: formData }).then(r => r.json());
+            });
+            
+            try {
+                await Promise.all(promesas);
+                return { status: 'ok' }; // Simular éxito si todo sale bien
+            } catch(e) { return { error: "Fallo envío grupal" }; }
+        }
+
+        // MODO NORMAL
         const formData = new FormData();
         formData.append('nombre', miNombre);
-        formData.append('sender_pin', miPin);
-        formData.append('receiver_pin', this.chatActivoPin); // A quién va dirigido
+        formData.append('sender_email', miCorreo);
+        formData.append('receiver_email', this.chatActivoCorreo);
         formData.append('texto', texto);
         if (archivo) formData.append('file', archivo);
 
         try {
-            const res = await fetch(`${BASE_API}/chat/enviar`, {
-                method: 'POST',
-                body: formData // Fetch detecta FormData y pone los headers correctos solo
-            });
+            const res = await fetch(`${BASE_API}/chat/enviar`, { method: 'POST', body: formData });
             return await res.json();
-        } catch (e) { 
-            console.error("Error en envío:", e);
-            return { error: "Fallo de conexión" }; 
-        }
+        } catch (e) { return { error: "Fallo de conexión" }; }
     },
 
     // 4. VERIFICAR NOTIFICACIONES (Punto Rojo)
     async verificarPuntoRojo() {
-        const miPin = obtenerMiPin();
-        if (!miPin) return false;
+        const miCorreo = obtenerMiCorreo();
+        if (!miCorreo) return false;
         try {
-            const res = await fetch(`${BASE_API}/chat/unread/${miPin}`);
+            const res = await fetch(`${BASE_API}/chat/unread/${miCorreo}`);
             const data = await res.json();
             return data.total_unread > 0;
         } catch (e) { return false; }
@@ -128,13 +171,13 @@ window.ChatManager = {
 
     // 6. VACIAR CHAT COMPLETO
     async limpiarChatCompleto() {
-        const miPin = obtenerMiPin();
-        if (!miPin || !this.chatActivoPin) return;
+        const miCorreo = obtenerMiCorreo();
+        if (!miCorreo || !this.chatActivoCorreo) return;
         try {
             await fetch(`${BASE_API}/chat/limpiar`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mi_pin: miPin, otro_pin: this.chatActivoPin })
+                body: JSON.stringify({ mi_email: miCorreo, otro_email: this.chatActivoCorreo })
             });
         } catch (e) { console.error("Error limpiando chat", e); }
     },
@@ -144,61 +187,102 @@ window.ChatManager = {
         const container = document.getElementById('chat-contacts');
         if (!container) return;
 
+        // INYECCIÓN DE BOTÓN DE GRUPO EN LA BARRA DE BÚSQUEDA
+        const searchContainer = document.querySelector('#vista-contactos .input-group');
+        if (searchContainer && !document.getElementById('btn-crear-grupo-ui')) {
+            const btnGrupo = document.createElement('button');
+            btnGrupo.id = 'btn-crear-grupo-ui';
+            btnGrupo.className = 'btn btn-primary shadow-none px-3';
+            btnGrupo.style.borderTopRightRadius = '50rem';
+            btnGrupo.style.borderBottomRightRadius = '50rem';
+            btnGrupo.innerHTML = '<i class="bi bi-people-fill"></i>';
+            btnGrupo.title = 'Crear/Editar Grupo';
+            btnGrupo.onclick = () => window.abrirModalGrupo();
+            
+            const inputBusqueda = document.getElementById('buscador-input');
+            if(inputBusqueda) inputBusqueda.classList.remove('rounded-end-pill');
+            searchContainer.appendChild(btnGrupo);
+        }
+
+        const fijados = this.obtenerFijados();
+        const grupo = this.obtenerGrupo();
+
+        // Ordenar: Fijados arriba
+        contactos.sort((a, b) => {
+            const aFijado = fijados.includes(a.email);
+            const bFijado = fijados.includes(b.email);
+            if (aFijado && !bFijado) return -1;
+            if (!aFijado && bFijado) return 1;
+            return 0; // Conserva el orden alfabético original
+        });
+
+        // Insertar el Grupo al principio si existe
+        if (grupo.length > 0) {
+            contactos.unshift({
+                email: 'GRUPO_LOCAL',
+                nombre: '👥 Grupo de Difusión',
+                is_online: true,
+                no_leidos: 0,
+                es_grupo: true
+            });
+        }
+
         let html = '';
         contactos.forEach(c => {
-            const inicial = c.nombre ? c.nombre.charAt(0).toUpperCase() : '?';
-            const badge = c.no_leidos > 0 
-                ? `<span class="badge bg-danger rounded-pill shadow-sm ms-2">${c.no_leidos}</span>` 
-                : '';
+            const inicial = c.es_grupo ? '<i class="bi bi-collection-fill"></i>' : (c.nombre ? c.nombre.charAt(0).toUpperCase() : '?');
+            const badge = c.no_leidos > 0 ? `<span class="badge bg-danger rounded-pill shadow-sm ms-2">${c.no_leidos}</span>` : '';
+            
+            const isFijado = fijados.includes(c.email);
+            const pinIcon = isFijado ? '<i class="bi bi-pin-angle-fill text-primary ms-2" title="Fijado"></i>' : '';
 
-            // Punto verde si is_online viene en true desde la Base de Datos
+            // Punto verde
             const isOnlineStatus = c.is_online
                 ? `<span class="position-absolute bottom-0 end-0 p-1 bg-success border border-white rounded-circle" style="width: 14px; height: 14px; box-shadow: 0 0 5px rgba(25, 135, 84, 0.5);" title="En línea"></span>`
                 : `<span class="position-absolute bottom-0 end-0 p-1 bg-secondary border border-white rounded-circle" style="width: 14px; height: 14px; opacity: 0.5;" title="Desconectado"></span>`;
 
-            // Se agregó class 'contacto-item' y 'data-name' para hacer funcionar el Buscador
+            // En lugar de mostrar PIN, ahora mostramos el correo si no es un grupo
+            const infoSecundaria = c.es_grupo 
+                ? 'Mensajes masivos compartidos' 
+                : `${c.email || 'Sin correo'} | ${c.is_online ? '<span class="text-success fw-medium">En línea</span>' : 'Desconectado'}`;
+
             html += `
-            <div class="list-group-item d-flex align-items-center p-3 border-0 border-bottom contacto-item" data-name="${(c.nombre || '').toLowerCase()}" style="cursor:pointer; transition: background 0.2s;" onclick="window.abrirChatPrivado('${c.pin}', '${c.nombre.replace(/'/g, "\\'")}')" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
+            <div class="list-group-item d-flex align-items-center p-3 border-0 border-bottom contacto-item ${c.es_grupo ? 'bg-light' : ''}" data-name="${(c.nombre || '').toLowerCase()}" style="cursor:pointer; transition: background 0.2s;" onclick="window.abrirChatPrivado('${c.email}', '${c.nombre.replace(/'/g, "\\'")}')" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
                 
                 <div class="position-relative">
                     <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 48px; height: 48px; font-size: 1.3rem;">
                         ${inicial}
                     </div>
-                    ${isOnlineStatus}
+                    ${!c.es_grupo ? isOnlineStatus : ''}
                 </div>
 
                 <div class="ms-3 flex-grow-1">
-                    <p class="mb-0 fw-bold text-dark d-flex align-items-center">${c.nombre} ${badge}</p>
-                    <p class="mb-0 text-muted small">PIN: ***${c.pin ? c.pin.slice(-3) : '---'} | ${c.is_online ? '<span class="text-success fw-medium">En línea</span>' : 'Desconectado'}</p>
+                    <p class="mb-0 fw-bold text-dark d-flex align-items-center">${c.nombre} ${pinIcon} ${badge}</p>
+                    <p class="mb-0 text-muted small">${infoSecundaria}</p>
                 </div>
-                
             </div>`;
         });
         
         container.innerHTML = html || '<p class="text-center text-muted p-5">No hay compañeros disponibles.</p>';
     },
 
-    // 8. PINTAR LOS MENSAJES (ANTI-PARPADEO, DOBLE CHECK, BOTÓN BORRAR)
+    // 8. PINTAR LOS MENSAJES
     renderizarMensajes(mensajes, containerId) {
         const container = document.getElementById(containerId);
         if (!container || !Array.isArray(mensajes)) return;
 
-        const miPin = obtenerMiPin();
+        const miCorreo = obtenerMiCorreo();
         let html = '';
 
         mensajes.forEach(m => {
-            const esMio = (m.sender_pin === miPin);
+            const esMio = (m.sender_email === miCorreo);
             
             let readIcon = '';
             let btnBorrar = '';
 
             if (esMio) {
-                // Doble check azul o gris
                 readIcon = m.is_read 
                     ? '<i class="bi bi-check2-all text-info ms-1" style="font-size:1.1rem;"></i>' 
                     : '<i class="bi bi-check2 text-secondary ms-1" style="font-size:1.1rem;"></i>'; 
-                
-                // Botón individual de borrado
                 btnBorrar = `<i class="bi bi-trash-fill text-white-50 ms-2" style="cursor:pointer;" onclick="window.eliminarMensaje(${m.id})" title="Borrar para todos"></i>`;
             }
 
@@ -214,9 +298,15 @@ window.ChatManager = {
                 }
             }
 
+            // Identificador de quién envió el mensaje (Útil para el Grupo)
+            const nombreRemitente = (!esMio && this.chatActivoCorreo === 'GRUPO_LOCAL') 
+                ? `<small class="text-primary fw-bold d-block mb-1" style="font-size: 0.75rem;">${m.nombre}</small>` 
+                : '';
+
             html += `
                 <div class="d-flex flex-column ${esMio ? 'align-items-end' : 'align-items-start'} mb-3">
                     <div class="p-3 rounded-4 shadow-sm position-relative" style="max-width: 85%; min-width: 120px; ${esMio ? 'background-color: #0d6efd; color: white;' : 'background-color: white; border: 1px solid #dee2e6; color: #212529;'}">
+                        ${nombreRemitente}
                         ${adjuntoHtml}
                         <p class="mb-0 text-break" style="font-size: 0.95rem; line-height: 1.3;">${m.texto || ''}</p>
                         
@@ -231,26 +321,22 @@ window.ChatManager = {
 
         const newContent = html || '<div class="text-center text-muted py-5"><i class="bi bi-chat-dots fs-1 d-block mb-2"></i>Inicia la conversación.</div>';
 
-        // --- SISTEMA ANTI-PARPADEO ---
+        // SISTEMA ANTI-PARPADEO
         if (container.dataset.lastContent !== newContent) {
             const estabaAlFinal = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
-            
             container.innerHTML = newContent;
             container.dataset.lastContent = newContent; 
-            
-            if (estabaAlFinal) {
-                container.scrollTop = container.scrollHeight;
-            }
+            if (estabaAlFinal) container.scrollTop = container.scrollHeight;
         }
     }
 };
 
 // ============================================================================
-// FUNCIONES DE NAVEGACIÓN DENTRO DEL MODAL (Llamadas desde HTML)
+// FUNCIONES DE NAVEGACIÓN Y MENÚ
 // ============================================================================
 
-window.abrirChatPrivado = function(pin, nombre) {
-    window.ChatManager.chatActivoPin = pin;
+window.abrirChatPrivado = function(correo, nombre) {
+    window.ChatManager.chatActivoCorreo = correo;
     window.ChatManager.chatActivoNombre = nombre;
     
     const titleEl = document.getElementById('chat-title');
@@ -261,42 +347,54 @@ window.abrirChatPrivado = function(pin, nombre) {
     document.getElementById('vista-chat').classList.add('d-flex');
     document.getElementById('btn-chat-volver').classList.remove('d-none');
     
-    // Mostramos el menú de los 3 puntos y le inyectamos la opción de Bloquear
+    // Configuración del MENÚ DE 3 PUNTITOS (Dinámico)
     const btnOpts = document.getElementById('chat-options-btn');
     if(btnOpts) {
         btnOpts.classList.remove('d-none');
-        
         const dropdown = btnOpts.querySelector('.dropdown-menu');
-        if (dropdown && !dropdown.querySelector('.btn-bloquear-menu')) {
-            const li = document.createElement('li');
-            li.innerHTML = `<a class="dropdown-item py-2 text-warning fw-bold btn-bloquear-menu" href="#" onclick="window.abrirModalBloqueos()"><i class="bi bi-slash-circle me-2"></i> Bloquear Usuarios</a>`;
-            dropdown.insertBefore(li, dropdown.firstChild);
-        }
+        
+        if (dropdown) {
+            // Limpiar inyecciones anteriores
+            dropdown.querySelectorAll('.dynamic-chat-opt').forEach(e => e.remove());
 
-        // 👇 PARCHE INFAIBLE PARA LOS 3 PUNTITOS 👇
-        // Bypasseamos Bootstrap para evitar problemas con Popper.js
-        const btnThreeDots = btnOpts.querySelector('button');
-        if (btnThreeDots && dropdown && !btnThreeDots.dataset.fixed) {
-            btnThreeDots.dataset.fixed = "true";
-            btnThreeDots.removeAttribute('data-bs-toggle'); // Removemos el hook roto
-            
-            btnThreeDots.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                dropdown.classList.toggle('show'); // Mostrar/Ocultar manual
-            });
+            if (correo === 'GRUPO_LOCAL') {
+                // OPCIONES DE GRUPO
+                const liGrp = document.createElement('li');
+                liGrp.className = 'dynamic-chat-opt';
+                liGrp.innerHTML = `<a class="dropdown-item py-2 text-danger fw-bold" href="#" onclick="window.disolverGrupo()"><i class="bi bi-x-octagon-fill me-2"></i> Disolver Grupo</a>`;
+                dropdown.insertBefore(liGrp, dropdown.firstChild);
+            } else {
+                // OPCIONES DE USUARIO 1 a 1
+                const isFijado = window.ChatManager.obtenerFijados().includes(correo);
+                
+                const liBlock = document.createElement('li');
+                liBlock.className = 'dynamic-chat-opt';
+                liBlock.innerHTML = `<a class="dropdown-item py-2 text-warning fw-bold" href="#" onclick="window.abrirModalBloqueos()"><i class="bi bi-slash-circle me-2"></i> Bloquear Usuarios</a>`;
+                dropdown.insertBefore(liBlock, dropdown.firstChild);
 
-            // Cerrar menú si tocamos fuera de él
-            document.addEventListener('click', (e) => {
-                if (!btnOpts.contains(e.target)) {
-                    dropdown.classList.remove('show');
-                }
-            });
+                const liFijar = document.createElement('li');
+                liFijar.className = 'dynamic-chat-opt';
+                liFijar.innerHTML = `<a class="dropdown-item py-2 text-primary fw-bold" href="#" onclick="window.toggleFijar('${correo}')"><i class="bi bi-pin-angle-fill me-2"></i> ${isFijado ? 'Desfijar' : 'Fijar'} Usuario</a>`;
+                dropdown.insertBefore(liFijar, dropdown.firstChild);
+            }
 
-            // Cerrar menú al seleccionar una opción
-            dropdown.addEventListener('click', () => {
-                dropdown.classList.remove('show');
-            });
+            // PARCHE INFAIBLE PARA BOOTSTRAP DROPDOWN
+            const btnThreeDots = btnOpts.querySelector('button');
+            if (btnThreeDots && !btnThreeDots.dataset.fixed) {
+                btnThreeDots.dataset.fixed = "true";
+                btnThreeDots.removeAttribute('data-bs-toggle'); 
+                
+                btnThreeDots.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropdown.classList.toggle('show'); 
+                });
+
+                document.addEventListener('click', (e) => {
+                    if (!btnOpts.contains(e.target)) dropdown.classList.remove('show');
+                });
+                dropdown.addEventListener('click', () => dropdown.classList.remove('show'));
+            }
         }
     }
 
@@ -305,12 +403,11 @@ window.abrirChatPrivado = function(pin, nombre) {
         chatWin.innerHTML = '';
         chatWin.dataset.lastContent = '';
     }
-    
     if (window.refrescarChat) window.refrescarChat();
 };
 
 window.volverAContactos = function() {
-    window.ChatManager.chatActivoPin = null;
+    window.ChatManager.chatActivoCorreo = null;
     
     const titleEl = document.getElementById('chat-title');
     if(titleEl) titleEl.innerText = 'Mensajes';
@@ -320,7 +417,6 @@ window.volverAContactos = function() {
     document.getElementById('vista-contactos').classList.remove('d-none');
     document.getElementById('btn-chat-volver').classList.add('d-none');
 
-    // Ocultamos el menú de los 3 puntos
     const btnOpts = document.getElementById('chat-options-btn');
     if(btnOpts) btnOpts.classList.add('d-none');
     
@@ -328,8 +424,25 @@ window.volverAContactos = function() {
 };
 
 // ============================================================================
-// NUEVAS UTILIDADES GLOBALES (Buscador, Notificaciones, Exportar, Eliminar)
+// FUNCIONALIDADES ADICIONALES (Fijar, Grupos, Exportar)
 // ============================================================================
+
+window.toggleFijar = function(correo) {
+    let fijados = window.ChatManager.obtenerFijados();
+    if (fijados.includes(correo)) fijados = fijados.filter(p => p !== correo);
+    else fijados.push(correo);
+    window.ChatManager.guardarFijados(fijados);
+    
+    // Refrescar menú visualmente abriéndolo rápido de nuevo
+    window.abrirChatPrivado(correo, window.ChatManager.chatActivoNombre);
+};
+
+window.disolverGrupo = function() {
+    if(confirm("¿Disolver el grupo? Los mensajes enviados seguirán existiendo en los chats individuales de cada persona.")) {
+        window.ChatManager.guardarGrupo([]);
+        window.volverAContactos();
+    }
+};
 
 window.filtrarBuscador = function() {
     const filtro = document.getElementById('buscador-input');
@@ -351,27 +464,20 @@ window.eliminarMensaje = async function(id) {
 };
 
 window.limpiarChat = async function() {
-    if (confirm("¿Estás seguro de que quieres eliminar TODA la conversación con este usuario? (Esta acción no se puede deshacer)")) {
+    if (confirm("¿Estás seguro de que quieres eliminar TODA la conversación con este usuario?")) {
         await window.ChatManager.limpiarChatCompleto();
         if (window.refrescarChat) window.refrescarChat();
     }
 };
 
 window.exportarTXT = function() {
-    if (!window.ChatManager || !window.ChatManager.mensajesCacheados.length) {
-        alert("No hay mensajes para exportar."); 
-        return;
-    }
-    
+    if (!window.ChatManager || !window.ChatManager.mensajesCacheados.length) return alert("No hay mensajes para exportar."); 
     let textData = `=== CHAT CON ${window.ChatManager.chatActivoNombre} ===\n\n`;
     window.ChatManager.mensajesCacheados.forEach(m => {
-        // Usamos fecha_larga si existe, si no caemos en la corta
-        textData += `[${m.fecha_larga || m.fecha}] ${m.nombre}:\n`;
-        if(m.texto) textData += `${m.texto}\n`;
+        textData += `[${m.fecha_larga || m.fecha}] ${m.nombre}:\n${m.texto || ''}\n`;
         if(m.file_path) textData += `<Archivo Adjunto: ${m.file_type}>\n`;
         textData += `----------------------------\n`;
     });
-    
     const blob = new Blob([textData], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -382,21 +488,19 @@ window.exportarTXT = function() {
 };
 
 // ============================================================================
-// LÓGICA DE LA VISTA DE INVISIBILIDAD (Bloqueos)
+// LÓGICA DE VISTAS ESPECIALES (Bloqueos y Grupos)
 // ============================================================================
 
 window.abrirModalBloqueos = async function() {
-    // 1. Construir el contenedor dinámicamente si no existe
-    let container = document.getElementById('vista-bloqueos');
+    let container = document.getElementById('vista-especial');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'vista-bloqueos';
+        container.id = 'vista-especial';
         container.className = 'd-none flex-column h-100 bg-white';
         const modalBody = document.querySelector('#modalChat .modal-body');
         if (modalBody) modalBody.appendChild(container);
     }
 
-    // 2. Obtener TODOS los usuarios (true evita que se filtren los ya bloqueados)
     const contactos = await window.ChatManager.obtenerContactos(true);
     const bloqueados = window.ChatManager.obtenerBloqueados();
 
@@ -404,93 +508,125 @@ window.abrirModalBloqueos = async function() {
         <div class="flex-grow-1 overflow-auto p-3" style="height: 65vh;">
             <div class="alert alert-warning border-0 shadow-sm rounded-4 mb-3 d-flex align-items-center">
                 <i class="bi bi-eye-slash-fill fs-3 me-3"></i>
-                <small>Los usuarios seleccionados se volverán invisibles en tu lista principal.</small>
+                <small>Los usuarios bloqueados no aparecerán en tu lista de contactos.</small>
             </div>
             <div class="list-group shadow-sm border-0">
     `;
 
-    if(contactos.length === 0) {
-        html += `<div class="text-center p-4 text-muted">No hay usuarios disponibles.</div>`;
-    }
-
-    // 3. Imprimir cada usuario con su Switch (Interruptor)
     contactos.forEach(c => {
-        const isBlocked = bloqueados.includes(c.pin);
+        // PROTECCIÓN DE SUPERADMINS: Ahora validamos dinámicamente por rol, olvidándonos de los pines hardcodeados
+        const esSuperAdmin = (c.rol === 'superadmin');
+        if (esSuperAdmin) return;
+
+        const isBlocked = bloqueados.includes(c.email);
         html += `
-            <label class="list-group-item d-flex justify-content-between align-items-center border-0 border-bottom p-3" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
+            <label class="list-group-item d-flex justify-content-between align-items-center border-0 border-bottom p-3" style="cursor:pointer;">
                 <div class="d-flex align-items-center">
                     <div class="rounded-circle bg-secondary bg-opacity-10 text-secondary d-flex align-items-center justify-content-center fw-bold me-3" style="width: 42px; height: 42px;">
                         ${c.nombre.charAt(0).toUpperCase()}
                     </div>
                     <div>
                         <span class="fw-bold text-dark">${c.nombre}</span>
-                        <div class="text-muted small">PIN: ***${c.pin.slice(-3)}</div>
+                        <div class="text-muted small">${c.email || 'Sin correo'}</div>
                     </div>
                 </div>
                 <div class="form-check form-switch m-0 p-0 d-flex align-items-center">
-                    <input class="form-check-input ms-0 mt-0 shadow-none" type="checkbox" role="switch" style="width: 40px; height: 20px; cursor: pointer;" value="${c.pin}" ${isBlocked ? 'checked' : ''} onchange="window.toggleBloqueo('${c.pin}', this.checked)">
+                    <input class="form-check-input ms-0 mt-0 shadow-none fs-4" type="checkbox" style="cursor: pointer;" value="${c.email}" ${isBlocked ? 'checked' : ''} onchange="window.toggleBloqueo('${c.email}', this.checked)">
                 </div>
-            </label>
-        `;
+            </label>`;
     });
 
-    html += `
-            </div>
-        </div>
-    `;
-    container.innerHTML = html;
+    container.innerHTML = html + `</div></div>`;
+    cambiarAVistaEspecial('Privacidad');
+};
 
-    // 4. Cambiar de vista (Ocultar chat, mostrar bloqueos)
-    const vistaContactos = document.getElementById('vista-contactos');
-    const vistaChat = document.getElementById('vista-chat');
-    
-    if(vistaContactos) vistaContactos.classList.add('d-none');
-    if(vistaChat) {
-        vistaChat.classList.add('d-none');
-        vistaChat.classList.remove('d-flex');
+window.abrirModalGrupo = async function() {
+    let container = document.getElementById('vista-especial');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'vista-especial';
+        container.className = 'd-none flex-column h-100 bg-white';
+        document.querySelector('#modalChat .modal-body').appendChild(container);
     }
+
+    const contactos = await window.ChatManager.obtenerContactos(false); // Solo no bloqueados
+    const grupo = window.ChatManager.obtenerGrupo();
+
+    let html = `
+        <div class="flex-grow-1 overflow-auto p-3" style="height: 65vh;">
+            <div class="alert alert-info border-0 shadow-sm rounded-4 mb-3 d-flex align-items-center">
+                <i class="bi bi-people-fill fs-3 me-3"></i>
+                <small>Selecciona los miembros. Los mensajes que envíes en el grupo llegarán a todos ellos.</small>
+            </div>
+            <div class="list-group shadow-sm border-0">
+    `;
+
+    contactos.forEach(c => {
+        const inGroup = grupo.includes(c.email);
+        html += `
+            <label class="list-group-item d-flex justify-content-between align-items-center border-0 border-bottom p-3" style="cursor:pointer;">
+                <div class="d-flex align-items-center">
+                    <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold me-3" style="width: 42px; height: 42px;">
+                        ${c.nombre.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <span class="fw-bold text-dark">${c.nombre}</span>
+                        <div class="text-muted small">${c.email || 'Sin correo'}</div>
+                    </div>
+                </div>
+                <div class="form-check m-0 p-0 d-flex align-items-center">
+                    <input class="form-check-input ms-0 mt-0 shadow-none fs-4" type="checkbox" style="cursor: pointer;" value="${c.email}" ${inGroup ? 'checked' : ''} onchange="window.toggleGrupo('${c.email}', this.checked)">
+                </div>
+            </label>`;
+    });
+
+    container.innerHTML = html + `</div></div>`;
+    cambiarAVistaEspecial('Crear Grupo');
+};
+
+function cambiarAVistaEspecial(titulo) {
+    document.getElementById('vista-contactos').classList.add('d-none');
+    const vistaChat = document.getElementById('vista-chat');
+    if(vistaChat) { vistaChat.classList.add('d-none'); vistaChat.classList.remove('d-flex'); }
     
+    const container = document.getElementById('vista-especial');
     container.classList.remove('d-none');
     container.classList.add('d-flex');
 
-    // Modificar cabecera superior
-    const titleEl = document.getElementById('chat-title');
-    if(titleEl) titleEl.innerText = 'Privacidad';
-    
+    document.getElementById('chat-title').innerText = titulo;
     const btnOpts = document.getElementById('chat-options-btn');
     if(btnOpts) btnOpts.classList.add('d-none');
 
-    // Cambiamos el comportamiento del botón volver para salir de la ventana de bloqueos
     const btnVolver = document.getElementById('btn-chat-volver');
     if(btnVolver) {
         btnVolver.classList.remove('d-none');
-        btnVolver.setAttribute('onclick', 'window.cerrarModalBloqueos()');
+        btnVolver.setAttribute('onclick', 'window.cerrarVistaEspecial()');
     }
-};
+}
 
-window.cerrarModalBloqueos = function() {
-    const container = document.getElementById('vista-bloqueos');
+window.cerrarVistaEspecial = function() {
+    const container = document.getElementById('vista-especial');
     if (container) {
         container.classList.add('d-none');
         container.classList.remove('d-flex');
     }
-    
-    // Restaurar la acción original de la flecha de regresar
     const btnVolver = document.getElementById('btn-chat-volver');
     if(btnVolver) btnVolver.setAttribute('onclick', 'window.volverAContactos()');
-    
-    // Forzamos la vuelta al menú principal (Esto limpia la lista automáticamente)
     window.volverAContactos();
 };
 
-window.toggleBloqueo = function(pin, isBlocked) {
+window.toggleBloqueo = function(correo, isBlocked) {
     let bloqueados = window.ChatManager.obtenerBloqueados();
-    if (isBlocked) {
-        if (!bloqueados.includes(pin)) bloqueados.push(pin);
-    } else {
-        bloqueados = bloqueados.filter(p => p !== pin);
-    }
+    if (isBlocked) { if (!bloqueados.includes(correo)) bloqueados.push(correo); } 
+    else { bloqueados = bloqueados.filter(p => p !== correo); }
     window.ChatManager.guardarBloqueados(bloqueados);
+};
+
+window.toggleGrupo = function(correo, isAdded) {
+    let grupo = window.ChatManager.obtenerGrupo();
+    if (isAdded) { if (!grupo.includes(correo)) grupo.push(correo); } 
+    else { grupo = grupo.filter(p => p !== correo); }
+    window.ChatManager.guardarGrupo(grupo);
 };
 
 // ============================================================================
@@ -498,15 +634,10 @@ window.toggleBloqueo = function(pin, isBlocked) {
 // ============================================================================
 
 window.revisarNotificacionesGlobales = async function() {
-    const miPin = obtenerMiPin();
-    
-    // 1. Enviar un Latido Silencioso (Ping) para mantenernos 'En Línea' en la BD
-    if (miPin) {
-        fetch(`${BASE_API}/ping/${miPin}`).catch(() => {});
-    }
+    const miCorreo = obtenerMiCorreo();
+    if (miCorreo) fetch(`${BASE_API}/ping/${miCorreo}`).catch(() => {});
 
     const btnFlotante = document.getElementById('btn-chat-flotante');
-    // Revisamos notificaciones solo si el botón existe y está visible
     if (window.ChatManager && btnFlotante && !btnFlotante.classList.contains('hidden-forced')) {
         const hayNuevos = await window.ChatManager.verificarPuntoRojo();
         const badge = document.getElementById('chat-badge');
@@ -517,5 +648,4 @@ window.revisarNotificacionesGlobales = async function() {
     }
 };
 
-// Iniciamos el ciclo que pregunta por nuevos mensajes cada 6 segundos automáticamente
 setInterval(window.revisarNotificacionesGlobales, 6000);

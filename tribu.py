@@ -248,7 +248,7 @@ def registrar_usuario(app_slug):
             {
                 "n": data['nombre'], 
                 "a": data['apellido1'], 
-                "pin": data['pin'],
+                "pin": data.get('pin', ''), # Guardamos pin si viene por defecto
                 "tel": data.get('telefono', ''),
                 "emg_n": data.get('emgNombre', ''),
                 "emg_t": data.get('emgTelefono', ''),
@@ -357,7 +357,7 @@ def editar_perfil(app_slug):
             {
                 "n": data['nombre'], 
                 "a": apellidos_completos.strip(), 
-                "pin": data['pin'],
+                "pin": data.get('pin', ''),
                 "tel": data.get('telefono', ''),
                 "emg_n": data.get('emgNombre', ''),
                 "emg_t": data.get('emgTelefono', ''),
@@ -380,12 +380,12 @@ def editar_perfil(app_slug):
             session.close()
 
 # ==============================================================================
-# SISTEMA DE NOTIFICACIONES (PING) Y CONTACTOS EN LÍNEA
+# SISTEMA DE NOTIFICACIONES (PING) Y CONTACTOS EN LÍNEA (AHORA POR EMAIL)
 # ==============================================================================
 
-@tribu_bp.route('/api/<app_slug>/ping/<pin>', methods=['GET', 'OPTIONS'])
-def ping_usuario(app_slug, pin):
-    """Latido (Heartbeat) del frontend para indicar que el usuario está conectado"""
+@tribu_bp.route('/api/<app_slug>/ping/<email>', methods=['GET', 'OPTIONS'])
+def ping_usuario(app_slug, email):
+    """Latido (Heartbeat) del frontend basado en email"""
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
         
@@ -393,11 +393,16 @@ def ping_usuario(app_slug, pin):
     try:
         session = get_db_session(app_slug)
         current_time = int(time.time())
-        session.execute(
-            text("UPDATE member SET last_active = :time WHERE pin = :pin"),
-            {"time": current_time, "pin": pin}
-        )
-        session.commit()
+        
+        # Primero buscamos el ID del usuario usando su correo en la tabla 'user'
+        user_record = session.execute(text("SELECT id FROM user WHERE email = :e"), {"e": email}).fetchone()
+        if user_record:
+            # Actualizamos el last_active en la tabla 'member'
+            session.execute(
+                text("UPDATE member SET last_active = :time WHERE id = :id"),
+                {"time": current_time, "id": user_record[0]}
+            )
+            session.commit()
         return jsonify({"status": "ok"})
     except Exception:
         if session: session.rollback()
@@ -405,28 +410,31 @@ def ping_usuario(app_slug, pin):
     finally:
         if session: session.close()
 
-@tribu_bp.route('/api/<app_slug>/contactos/<mi_pin>', methods=['GET'])
-def obtener_contactos(app_slug, mi_pin):
-    """Devuelve la lista de usuarios, mensajes sin leer y estado En Línea"""
+@tribu_bp.route('/api/<app_slug>/contactos/<mi_email>', methods=['GET'])
+def obtener_contactos(app_slug, mi_email):
+    """Devuelve contactos cruzando tabla User y Member por Email"""
     session = None
     try:
         session = get_db_session(app_slug)
         current_time = int(time.time())
         
-        # Recuperamos todos menos a nosotros mismos, incluyendo la última vez que abrieron la app
-        miembros = session.execute(
-            text("SELECT id, nombre, apellido1, pin, last_active FROM member WHERE pin != :pin ORDER BY nombre ASC"),
-            {"pin": mi_pin}
-        ).mappings().fetchall()
+        # Unimos user y member y excluimos mi propio correo
+        query = text("""
+            SELECT u.email, m.nombre, m.apellido1, m.rol, m.pin, m.last_active 
+            FROM user u
+            JOIN member m ON u.id = m.id
+            WHERE u.email != :mi_email
+            ORDER BY m.nombre ASC
+        """)
+        usuarios = session.execute(query, {"mi_email": mi_email}).mappings().fetchall()
         
         contactos = []
-        for m in miembros:
-            apellido = m['apellido1'] if m['apellido1'] else ''
-            nombre_completo = f"{m['nombre']} {apellido}".strip()
+        for u in usuarios:
+            apellido = u['apellido1'] if u['apellido1'] else ''
+            nombre_completo = f"{u['nombre']} {apellido}".strip()
             
             # --- LÓGICA EN LÍNEA ---
-            # Si el último 'ping' fue hace menos de 30 segundos, consideramos que está conectado
-            last_active = m.get('last_active') or 0
+            last_active = u.get('last_active') or 0
             is_online = (current_time - last_active) < 30
             
             try:
@@ -434,19 +442,21 @@ def obtener_contactos(app_slug, mi_pin):
                     text("""
                         SELECT COUNT(*) as no_leidos 
                         FROM chat_message 
-                        WHERE sender_pin = :sender AND receiver_pin = :receiver AND is_read = 0
+                        WHERE sender_email = :sender AND receiver_email = :receiver AND is_read = 0
                     """),
-                    {"sender": m['pin'], "receiver": mi_pin}
+                    {"sender": u['email'], "receiver": mi_email}
                 ).mappings().fetchone()
                 no_leidos = res['no_leidos']
             except Exception:
                 no_leidos = 0 
                 
             contactos.append({
-                "pin": m['pin'],
+                "email": u['email'],
                 "nombre": nombre_completo,
+                "pin": u['pin'], # Dejamos el pin por si alguna vista local aún lo necesita
+                "rol": u['rol'],
                 "no_leidos": no_leidos,
-                "is_online": is_online  # Se lo pasamos a Javascript
+                "is_online": is_online 
             })
             
         return jsonify({"contactos": contactos})
@@ -458,10 +468,12 @@ def obtener_contactos(app_slug, mi_pin):
             session.close()
 
 # ==============================================================================
+# ADMINISTRACIÓN (EDICIÓN COMPLETA Y BORRADO POR EMAIL)
+# ==============================================================================
 
 @tribu_bp.route('/api/<app_slug>/admin/usuarios', methods=['GET', 'OPTIONS'])
 def admin_obtener_usuarios(app_slug):
-    """Devuelve la lista completa de usuarios registrados"""
+    """Devuelve la lista completa de usuarios registrados usando un JOIN"""
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
         
@@ -469,9 +481,13 @@ def admin_obtener_usuarios(app_slug):
     try:
         session = get_db_session(app_slug)
         
-        miembros = session.execute(
-            text("SELECT id, nombre, apellido1, pin, rol FROM member ORDER BY id ASC")
-        ).mappings().fetchall()
+        query = text("""
+            SELECT u.email, m.nombre, m.apellido1, m.pin, m.rol 
+            FROM member m
+            JOIN user u ON m.id = u.id
+            ORDER BY m.id ASC
+        """)
+        miembros = session.execute(query).mappings().fetchall()
         
         usuarios = []
         for index, m in enumerate(miembros, start=1):
@@ -481,6 +497,7 @@ def admin_obtener_usuarios(app_slug):
                 "consecutivo": index,
                 "nombre": m['nombre'],
                 "apellido1": apellido,
+                "email": m['email'], # Identificador principal ahora
                 "pin": m['pin'],
                 "rol": m.get('rol', 'usuario')
             })
@@ -493,8 +510,8 @@ def admin_obtener_usuarios(app_slug):
         if session:
             session.close()
 
-@tribu_bp.route('/api/<app_slug>/admin/usuario_detalle/<pin>', methods=['GET', 'OPTIONS'])
-def admin_usuario_detalle(app_slug, pin):
+@tribu_bp.route('/api/<app_slug>/admin/usuario_detalle/<email>', methods=['GET', 'OPTIONS'])
+def admin_usuario_detalle(app_slug, email):
     """Devuelve absolutamente todos los datos de un usuario para la vista de edición profunda"""
     if request.method == 'OPTIONS': 
         return jsonify({"status": "ok"}), 200
@@ -502,11 +519,11 @@ def admin_usuario_detalle(app_slug, pin):
     try:
         session = get_db_session(app_slug)
         
-        miembro = session.execute(text("SELECT * FROM member WHERE pin = :pin"), {"pin": pin}).mappings().fetchone()
-        if not miembro:
+        user_record = session.execute(text("SELECT id, email FROM user WHERE email = :e"), {"e": email}).mappings().fetchone()
+        if not user_record:
             return jsonify({"error": "Usuario no encontrado"}), 404
             
-        usuario = session.execute(text("SELECT email FROM user WHERE id = :id"), {"id": miembro['id']}).mappings().fetchone()
+        miembro = session.execute(text("SELECT * FROM member WHERE id = :id"), {"id": user_record['id']}).mappings().fetchone()
         
         return jsonify({
             "status": "ok", 
@@ -522,7 +539,7 @@ def admin_usuario_detalle(app_slug, pin):
                 "dobDia": str(miembro.get('dob_dia') or ''),
                 "dobMes": str(miembro.get('dob_mes') or ''),
                 "dobAnio": str(miembro.get('dob_anio') or ''),
-                "email": usuario['email'] if usuario else ''
+                "email": user_record['email']
             }
         })
     except Exception as e:
@@ -540,19 +557,27 @@ def admin_editar_usuario(app_slug):
         data = request.json
         session = get_db_session(app_slug)
         
-        editor_pin = data.get('editor_pin')
-        target_pin = data.get('target_pin', data.get('pin'))
+        # Identificadores por correo
+        editor_email = data.get('editor_email')
+        target_email = data.get('target_email', data.get('email'))
 
-        editor = session.execute(text("SELECT rol FROM member WHERE pin = :pin"), {"pin": editor_pin}).fetchone()
-        target_member = session.execute(text("SELECT * FROM member WHERE pin = :pin"), {"pin": target_pin}).mappings().fetchone()
+        # Obtener Rol del Editor
+        editor_user = session.execute(text("SELECT id FROM user WHERE email = :e"), {"e": editor_email}).fetchone()
+        editor_rol = 'usuario'
+        if editor_user:
+            e_member = session.execute(text("SELECT rol FROM member WHERE id = :id"), {"id": editor_user[0]}).fetchone()
+            if e_member: 
+                editor_rol = e_member[0]
 
-        if not target_member:
+        # Obtener Datos del Destino
+        target_user = session.execute(text("SELECT id FROM user WHERE email = :e"), {"e": target_email}).fetchone()
+        if not target_user:
             return jsonify({"error": "Usuario destino no encontrado."}), 404
 
-        editor_rol = editor[0] if editor and editor[0] else 'usuario'
-        target_id = target_member['id']
-        target_rol = target_member.get('rol', 'usuario')
+        target_id = target_user[0]
+        target_member = session.execute(text("SELECT * FROM member WHERE id = :id"), {"id": target_id}).mappings().fetchone()
         
+        target_rol = target_member.get('rol', 'usuario')
         nuevo_rol = data.get('rol', target_rol)
 
         # 🛡️ REGLAS DE PODER 🛡️
@@ -566,9 +591,10 @@ def admin_editar_usuario(app_slug):
                 return jsonify({"error": "Solo un Superusuario puede crear a otro Superusuario."}), 403
                 
         # --- 1. ACTUALIZAR TABLA MEMBER (Datos Públicos) ---
+        # Aseguramos no perder ningún dato que me habías enviado en tu versión
         nuevo_nombre = data.get('nombre', target_member['nombre'])
         nuevo_apellido = data.get('apellido', target_member['apellido1'])
-        nuevo_pin = data.get('nuevo_pin', data.get('pin', target_pin))
+        nuevo_pin = data.get('nuevo_pin', data.get('pin', target_member['pin']))
         nuevos_puntos = data.get('puntos', target_member['puntos_totales'])
         nuevo_telefono = data.get('telefono', target_member.get('telefono'))
         nuevo_emg_nombre = data.get('emgNombre', target_member.get('emg_nombre'))
@@ -578,7 +604,13 @@ def admin_editar_usuario(app_slug):
         nuevo_dob_anio = data.get('dobAnio', target_member.get('dob_anio'))
         
         session.execute(
-            text("UPDATE member SET nombre = :n, apellido1 = :a, rol = :r, pin = :np, puntos_totales = :pt, telefono = :tel, emg_nombre = :emg_n, emg_telefono = :emg_t, dob_dia = :dd, dob_mes = :dm, dob_anio = :da WHERE id = :id"),
+            text("""
+                UPDATE member 
+                SET nombre = :n, apellido1 = :a, rol = :r, pin = :np, puntos_totales = :pt, 
+                    telefono = :tel, emg_nombre = :emg_n, emg_telefono = :emg_t, 
+                    dob_dia = :dd, dob_mes = :dm, dob_anio = :da 
+                WHERE id = :id
+            """),
             {
                 "n": nuevo_nombre, 
                 "a": nuevo_apellido, 
@@ -596,11 +628,11 @@ def admin_editar_usuario(app_slug):
         )
         
         # --- 2. ACTUALIZAR TABLA USER (Datos de Seguridad) ---
-        nuevo_email = data.get('email')
+        nuevo_email_ingresado = data.get('nuevo_email', data.get('email'))
         nueva_pass = data.get('password')
         
-        if nuevo_email:
-            session.execute(text("UPDATE user SET email = :e WHERE id = :id"), {"e": nuevo_email, "id": target_id})
+        if nuevo_email_ingresado and nuevo_email_ingresado != target_email:
+            session.execute(text("UPDATE user SET email = :e WHERE id = :id"), {"e": nuevo_email_ingresado, "id": target_id})
             
         if nueva_pass and str(nueva_pass).strip() != '':
             hashed_pw = bcrypt.generate_password_hash(str(nueva_pass).strip()).decode('utf-8')
@@ -614,25 +646,31 @@ def admin_editar_usuario(app_slug):
     finally:
         if session: session.close()
 
-@tribu_bp.route('/api/<app_slug>/admin/borrar_usuario/<pin>', methods=['DELETE', 'OPTIONS'])
-def admin_borrar_usuario(app_slug, pin):
+@tribu_bp.route('/api/<app_slug>/admin/borrar_usuario/<email>', methods=['DELETE', 'OPTIONS'])
+def admin_borrar_usuario(app_slug, email):
     if request.method == 'OPTIONS': 
         return jsonify({"status": "ok"}), 200
     session = None
     try:
-        editor_pin = request.args.get('editor_pin')
+        editor_email = request.args.get('editor_email')
         session = get_db_session(app_slug)
         
-        editor = session.execute(text("SELECT rol FROM member WHERE pin = :pin"), {"pin": editor_pin}).fetchone()
-        editor_rol = editor[0] if editor and editor[0] else 'usuario'
+        # Validar permisos del editor
+        editor_user = session.execute(text("SELECT id FROM user WHERE email = :e"), {"e": editor_email}).fetchone()
+        editor_rol = 'usuario'
+        if editor_user:
+            e_member = session.execute(text("SELECT rol FROM member WHERE id = :id"), {"id": editor_user[0]}).fetchone()
+            if e_member: editor_rol = e_member[0]
         
         if editor_rol == 'usuario':
             return jsonify({"error": "No tienes permisos de Administrador."}), 403
             
-        target = session.execute(text("SELECT id, rol FROM member WHERE pin = :pin"), {"pin": pin}).fetchone()
-        if target:
-            user_id = target[0]
-            target_rol = target[1] if target[1] else 'usuario'
+        # Buscar Target
+        target_user = session.execute(text("SELECT id FROM user WHERE email = :e"), {"e": email}).fetchone()
+        if target_user:
+            user_id = target_user[0]
+            target_member = session.execute(text("SELECT rol FROM member WHERE id = :id"), {"id": user_id}).fetchone()
+            target_rol = target_member[0] if target_member else 'usuario'
             
             # 🛡️ REGLA: Admin no borra Superadmin 🛡️
             if editor_rol == 'admin' and target_rol == 'superadmin':
