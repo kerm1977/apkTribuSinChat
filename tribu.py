@@ -6,6 +6,7 @@
 # ==============================================================================
 
 import os
+import time # NUEVO: Importación necesaria para calcular los estados 'En línea'
 import logging
 from flask import Blueprint, request, jsonify, send_from_directory, make_response
 from flask_bcrypt import Bcrypt
@@ -81,7 +82,8 @@ def get_db_session(app_slug, superusuarios=None):
             Column('emg_telefono', String(20)),           
             Column('dob_dia', String(4)),                 
             Column('dob_mes', String(4)),                 
-            Column('dob_anio', String(4))                 
+            Column('dob_anio', String(4)),
+            Column('last_active', Integer, default=0)     # NUEVO: Para saber si está online
         )
         
         event = Table('event', metadata,
@@ -126,6 +128,10 @@ def get_db_session(app_slug, superusuarios=None):
                     pass
                 try:
                     conn.execute(text("ALTER TABLE member ADD COLUMN dob_anio VARCHAR(4)"))
+                except Exception:
+                    pass
+                try:
+                    conn.execute(text("ALTER TABLE member ADD COLUMN last_active INTEGER DEFAULT 0"))
                 except Exception:
                     pass
         
@@ -238,7 +244,7 @@ def registrar_usuario(app_slug):
         )
         
         session.execute(
-            text("INSERT INTO member (nombre, apellido1, pin, puntos_totales, rol, telefono, emg_nombre, emg_telefono, dob_dia, dob_mes, dob_anio) VALUES (:n, :a, :pin, 0, 'usuario', :tel, :emg_n, :emg_t, :d_dia, :d_mes, :d_anio)"),
+            text("INSERT INTO member (nombre, apellido1, pin, puntos_totales, rol, telefono, emg_nombre, emg_telefono, dob_dia, dob_mes, dob_anio, last_active) VALUES (:n, :a, :pin, 0, 'usuario', :tel, :emg_n, :emg_t, :d_dia, :d_mes, :d_anio, :la)"),
             {
                 "n": data['nombre'], 
                 "a": data['apellido1'], 
@@ -248,7 +254,8 @@ def registrar_usuario(app_slug):
                 "emg_t": data.get('emgTelefono', ''),
                 "d_dia": data.get('dobDia', ''),
                 "d_mes": data.get('dobMes', ''),
-                "d_anio": data.get('dobAnio', '')
+                "d_anio": data.get('dobAnio', ''),
+                "la": int(time.time()) # Al registrarse cuenta como conectado
             }
         )
         
@@ -372,15 +379,43 @@ def editar_perfil(app_slug):
         if session:
             session.close()
 
-@tribu_bp.route('/api/<app_slug>/contactos/<mi_pin>', methods=['GET'])
-def obtener_contactos(app_slug, mi_pin):
-    """Devuelve la lista de usuarios y la cantidad de mensajes sin leer"""
+# ==============================================================================
+# SISTEMA DE NOTIFICACIONES (PING) Y CONTACTOS EN LÍNEA
+# ==============================================================================
+
+@tribu_bp.route('/api/<app_slug>/ping/<pin>', methods=['GET', 'OPTIONS'])
+def ping_usuario(app_slug, pin):
+    """Latido (Heartbeat) del frontend para indicar que el usuario está conectado"""
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+        
     session = None
     try:
         session = get_db_session(app_slug)
+        current_time = int(time.time())
+        session.execute(
+            text("UPDATE member SET last_active = :time WHERE pin = :pin"),
+            {"time": current_time, "pin": pin}
+        )
+        session.commit()
+        return jsonify({"status": "ok"})
+    except Exception:
+        if session: session.rollback()
+        return jsonify({"error": "Falló ping"}), 500
+    finally:
+        if session: session.close()
+
+@tribu_bp.route('/api/<app_slug>/contactos/<mi_pin>', methods=['GET'])
+def obtener_contactos(app_slug, mi_pin):
+    """Devuelve la lista de usuarios, mensajes sin leer y estado En Línea"""
+    session = None
+    try:
+        session = get_db_session(app_slug)
+        current_time = int(time.time())
         
+        # Recuperamos todos menos a nosotros mismos, incluyendo la última vez que abrieron la app
         miembros = session.execute(
-            text("SELECT id, nombre, apellido1, pin FROM member WHERE pin != :pin"),
+            text("SELECT id, nombre, apellido1, pin, last_active FROM member WHERE pin != :pin ORDER BY nombre ASC"),
             {"pin": mi_pin}
         ).mappings().fetchall()
         
@@ -388,6 +423,11 @@ def obtener_contactos(app_slug, mi_pin):
         for m in miembros:
             apellido = m['apellido1'] if m['apellido1'] else ''
             nombre_completo = f"{m['nombre']} {apellido}".strip()
+            
+            # --- LÓGICA EN LÍNEA ---
+            # Si el último 'ping' fue hace menos de 30 segundos, consideramos que está conectado
+            last_active = m.get('last_active') or 0
+            is_online = (current_time - last_active) < 30
             
             try:
                 res = session.execute(
@@ -405,7 +445,8 @@ def obtener_contactos(app_slug, mi_pin):
             contactos.append({
                 "pin": m['pin'],
                 "nombre": nombre_completo,
-                "no_leidos": no_leidos
+                "no_leidos": no_leidos,
+                "is_online": is_online  # Se lo pasamos a Javascript
             })
             
         return jsonify({"contactos": contactos})
@@ -415,6 +456,8 @@ def obtener_contactos(app_slug, mi_pin):
     finally:
         if session:
             session.close()
+
+# ==============================================================================
 
 @tribu_bp.route('/api/<app_slug>/admin/usuarios', methods=['GET', 'OPTIONS'])
 def admin_obtener_usuarios(app_slug):

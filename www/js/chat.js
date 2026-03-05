@@ -2,8 +2,9 @@
  * chat.js - Lógica para el Enjambre de Chat Privado (1 a 1)
  */
 
-// 1. Apuntamos al dominio correcto y a la base de datos de tu app (ej: alatir)
-const BASE_API = "https://kenth1977.pythonanywhere.com/api/alatir";
+// 1. SOLUCIÓN CRÍTICA: Apuntamos al dominio correcto dinámicamente.
+// Ya no usamos 'alatir' fijo. Usamos la API_URL que configuró tu asistente Node.js.
+const BASE_API = typeof API_URL !== 'undefined' ? API_URL : "https://kenth1977.pythonanywhere.com/api/Geeko";
 
 // Función de ayuda para obtener el PIN del usuario actual desde localStorage
 function obtenerMiPin() {
@@ -82,7 +83,7 @@ window.ChatManager = {
         }
     },
 
-    // NUEVO: 4. VERIFICAR NOTIFICACIONES (Punto Rojo)
+    // 4. VERIFICAR NOTIFICACIONES (Punto Rojo)
     async verificarPuntoRojo() {
         const miPin = obtenerMiPin();
         if (!miPin) return false;
@@ -93,7 +94,7 @@ window.ChatManager = {
         } catch (e) { return false; }
     },
 
-    // NUEVO: 5. BORRAR UN MENSAJE
+    // 5. BORRAR UN MENSAJE
     async borrarMensaje(msgId) {
         try {
             const res = await fetch(`${BASE_API}/chat/mensaje/${msgId}`, { method: 'DELETE' });
@@ -101,7 +102,7 @@ window.ChatManager = {
         } catch (e) { return { error: "Error borrando" }; }
     },
 
-    // NUEVO: 6. VACIAR CHAT COMPLETO
+    // 6. VACIAR CHAT COMPLETO
     async limpiarChatCompleto() {
         const miPin = obtenerMiPin();
         if (!miPin || !this.chatActivoPin) return;
@@ -123,20 +124,30 @@ window.ChatManager = {
         contactos.forEach(c => {
             const inicial = c.nombre ? c.nombre.charAt(0).toUpperCase() : '?';
             const badge = c.no_leidos > 0 
-                ? `<span class="badge bg-danger rounded-pill shadow-sm">${c.no_leidos}</span>` 
+                ? `<span class="badge bg-danger rounded-pill shadow-sm ms-2">${c.no_leidos}</span>` 
                 : '';
+
+            // NUEVO: Punto verde si is_online viene en true desde la Base de Datos
+            const isOnlineStatus = c.is_online
+                ? `<span class="position-absolute bottom-0 end-0 p-1 bg-success border border-white rounded-circle" style="width: 14px; height: 14px; box-shadow: 0 0 5px rgba(25, 135, 84, 0.5);" title="En línea"></span>`
+                : `<span class="position-absolute bottom-0 end-0 p-1 bg-secondary border border-white rounded-circle" style="width: 14px; height: 14px; opacity: 0.5;" title="Desconectado"></span>`;
 
             // Se agregó class 'contacto-item' y 'data-name' para hacer funcionar el Buscador
             html += `
             <div class="list-group-item d-flex align-items-center p-3 border-0 border-bottom contacto-item" data-name="${(c.nombre || '').toLowerCase()}" style="cursor:pointer; transition: background 0.2s;" onclick="window.abrirChatPrivado('${c.pin}', '${c.nombre.replace(/'/g, "\\'")}')" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
-                <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 45px; height: 45px; font-size: 1.2rem;">
-                    ${inicial}
+                
+                <div class="position-relative">
+                    <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 48px; height: 48px; font-size: 1.3rem;">
+                        ${inicial}
+                    </div>
+                    ${isOnlineStatus}
                 </div>
+
                 <div class="ms-3 flex-grow-1">
-                    <p class="mb-0 fw-bold text-dark">${c.nombre}</p>
-                    <p class="mb-0 text-muted small">PIN: ***${c.pin ? c.pin.slice(-3) : '---'}</p>
+                    <p class="mb-0 fw-bold text-dark d-flex align-items-center">${c.nombre} ${badge}</p>
+                    <p class="mb-0 text-muted small">PIN: ***${c.pin ? c.pin.slice(-3) : '---'} | ${c.is_online ? '<span class="text-success fw-medium">En línea</span>' : 'Desconectado'}</p>
                 </div>
-                <div>${badge}</div>
+                
             </div>`;
         });
         
@@ -312,6 +323,13 @@ window.exportarTXT = function() {
 };
 
 window.revisarNotificacionesGlobales = async function() {
+    const miPin = obtenerMiPin();
+    
+    // 1. NUEVO: Enviar un Latido Silencioso (Ping) para mantenernos 'En Línea' en la BD
+    if (miPin) {
+        fetch(`${BASE_API}/ping/${miPin}`).catch(() => {});
+    }
+
     const btnFlotante = document.getElementById('btn-chat-flotante');
     // Revisamos notificaciones solo si el botón existe y está visible
     if (window.ChatManager && btnFlotante && !btnFlotante.classList.contains('hidden-forced')) {
