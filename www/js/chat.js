@@ -34,14 +34,38 @@ window.ChatManager = {
     chatActivoNombre: null,
     mensajesCacheados: [], // Guarda la conversación actual para poder Exportarla a TXT
 
-    // 1. OBTENER LISTA DE CONTACTOS
-    async obtenerContactos() {
+    // ==========================================
+    // NUEVO: GESTIÓN DE BLOQUEOS (Invisibilidad)
+    // ==========================================
+    obtenerBloqueados() {
+        const miPin = obtenerMiPin();
+        try {
+            const data = localStorage.getItem(`tribu_bloqueados_${miPin}`);
+            return data ? JSON.parse(data) : [];
+        } catch(e) { return []; }
+    },
+
+    guardarBloqueados(lista) {
+        const miPin = obtenerMiPin();
+        localStorage.setItem(`tribu_bloqueados_${miPin}`, JSON.stringify(lista));
+    },
+
+    // 1. OBTENER LISTA DE CONTACTOS (Ahora con filtro de invisibilidad)
+    async obtenerContactos(mostrarTodos = false) {
         const miPin = obtenerMiPin();
         if (!miPin) return [];
         try {
             const res = await fetch(`${BASE_API}/contactos/${miPin}`);
             const data = await res.json();
-            return data.contactos || [];
+            let contactos = data.contactos || [];
+
+            // 🔥 MAGIA: Filtramos a los bloqueados para que no aparezcan en la lista principal
+            if (!mostrarTodos) {
+                const bloqueados = this.obtenerBloqueados();
+                contactos = contactos.filter(c => !bloqueados.includes(c.pin));
+            }
+
+            return contactos;
         } catch (e) { return []; }
     },
 
@@ -127,7 +151,7 @@ window.ChatManager = {
                 ? `<span class="badge bg-danger rounded-pill shadow-sm ms-2">${c.no_leidos}</span>` 
                 : '';
 
-            // NUEVO: Punto verde si is_online viene en true desde la Base de Datos
+            // Punto verde si is_online viene en true desde la Base de Datos
             const isOnlineStatus = c.is_online
                 ? `<span class="position-absolute bottom-0 end-0 p-1 bg-success border border-white rounded-circle" style="width: 14px; height: 14px; box-shadow: 0 0 5px rgba(25, 135, 84, 0.5);" title="En línea"></span>`
                 : `<span class="position-absolute bottom-0 end-0 p-1 bg-secondary border border-white rounded-circle" style="width: 14px; height: 14px; opacity: 0.5;" title="Desconectado"></span>`;
@@ -151,7 +175,7 @@ window.ChatManager = {
             </div>`;
         });
         
-        container.innerHTML = html || '<p class="text-center text-muted p-5">No hay compañeros registrados aún.</p>';
+        container.innerHTML = html || '<p class="text-center text-muted p-5">No hay compañeros disponibles.</p>';
     },
 
     // 8. PINTAR LOS MENSAJES (ANTI-PARPADEO, DOBLE CHECK, BOTÓN BORRAR)
@@ -237,9 +261,44 @@ window.abrirChatPrivado = function(pin, nombre) {
     document.getElementById('vista-chat').classList.add('d-flex');
     document.getElementById('btn-chat-volver').classList.remove('d-none');
     
-    // Mostramos el menú de los 3 puntos
+    // Mostramos el menú de los 3 puntos y le inyectamos la opción de Bloquear
     const btnOpts = document.getElementById('chat-options-btn');
-    if(btnOpts) btnOpts.classList.remove('d-none');
+    if(btnOpts) {
+        btnOpts.classList.remove('d-none');
+        
+        const dropdown = btnOpts.querySelector('.dropdown-menu');
+        if (dropdown && !dropdown.querySelector('.btn-bloquear-menu')) {
+            const li = document.createElement('li');
+            li.innerHTML = `<a class="dropdown-item py-2 text-warning fw-bold btn-bloquear-menu" href="#" onclick="window.abrirModalBloqueos()"><i class="bi bi-slash-circle me-2"></i> Bloquear Usuarios</a>`;
+            dropdown.insertBefore(li, dropdown.firstChild);
+        }
+
+        // 👇 PARCHE INFAIBLE PARA LOS 3 PUNTITOS 👇
+        // Bypasseamos Bootstrap para evitar problemas con Popper.js
+        const btnThreeDots = btnOpts.querySelector('button');
+        if (btnThreeDots && dropdown && !btnThreeDots.dataset.fixed) {
+            btnThreeDots.dataset.fixed = "true";
+            btnThreeDots.removeAttribute('data-bs-toggle'); // Removemos el hook roto
+            
+            btnThreeDots.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropdown.classList.toggle('show'); // Mostrar/Ocultar manual
+            });
+
+            // Cerrar menú si tocamos fuera de él
+            document.addEventListener('click', (e) => {
+                if (!btnOpts.contains(e.target)) {
+                    dropdown.classList.remove('show');
+                }
+            });
+
+            // Cerrar menú al seleccionar una opción
+            dropdown.addEventListener('click', () => {
+                dropdown.classList.remove('show');
+            });
+        }
+    }
 
     const chatWin = document.getElementById('chat-window');
     if(chatWin) {
@@ -322,10 +381,126 @@ window.exportarTXT = function() {
     URL.revokeObjectURL(url);
 };
 
+// ============================================================================
+// LÓGICA DE LA VISTA DE INVISIBILIDAD (Bloqueos)
+// ============================================================================
+
+window.abrirModalBloqueos = async function() {
+    // 1. Construir el contenedor dinámicamente si no existe
+    let container = document.getElementById('vista-bloqueos');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'vista-bloqueos';
+        container.className = 'd-none flex-column h-100 bg-white';
+        const modalBody = document.querySelector('#modalChat .modal-body');
+        if (modalBody) modalBody.appendChild(container);
+    }
+
+    // 2. Obtener TODOS los usuarios (true evita que se filtren los ya bloqueados)
+    const contactos = await window.ChatManager.obtenerContactos(true);
+    const bloqueados = window.ChatManager.obtenerBloqueados();
+
+    let html = `
+        <div class="flex-grow-1 overflow-auto p-3" style="height: 65vh;">
+            <div class="alert alert-warning border-0 shadow-sm rounded-4 mb-3 d-flex align-items-center">
+                <i class="bi bi-eye-slash-fill fs-3 me-3"></i>
+                <small>Los usuarios seleccionados se volverán invisibles en tu lista principal.</small>
+            </div>
+            <div class="list-group shadow-sm border-0">
+    `;
+
+    if(contactos.length === 0) {
+        html += `<div class="text-center p-4 text-muted">No hay usuarios disponibles.</div>`;
+    }
+
+    // 3. Imprimir cada usuario con su Switch (Interruptor)
+    contactos.forEach(c => {
+        const isBlocked = bloqueados.includes(c.pin);
+        html += `
+            <label class="list-group-item d-flex justify-content-between align-items-center border-0 border-bottom p-3" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
+                <div class="d-flex align-items-center">
+                    <div class="rounded-circle bg-secondary bg-opacity-10 text-secondary d-flex align-items-center justify-content-center fw-bold me-3" style="width: 42px; height: 42px;">
+                        ${c.nombre.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <span class="fw-bold text-dark">${c.nombre}</span>
+                        <div class="text-muted small">PIN: ***${c.pin.slice(-3)}</div>
+                    </div>
+                </div>
+                <div class="form-check form-switch m-0 p-0 d-flex align-items-center">
+                    <input class="form-check-input ms-0 mt-0 shadow-none" type="checkbox" role="switch" style="width: 40px; height: 20px; cursor: pointer;" value="${c.pin}" ${isBlocked ? 'checked' : ''} onchange="window.toggleBloqueo('${c.pin}', this.checked)">
+                </div>
+            </label>
+        `;
+    });
+
+    html += `
+            </div>
+        </div>
+    `;
+    container.innerHTML = html;
+
+    // 4. Cambiar de vista (Ocultar chat, mostrar bloqueos)
+    const vistaContactos = document.getElementById('vista-contactos');
+    const vistaChat = document.getElementById('vista-chat');
+    
+    if(vistaContactos) vistaContactos.classList.add('d-none');
+    if(vistaChat) {
+        vistaChat.classList.add('d-none');
+        vistaChat.classList.remove('d-flex');
+    }
+    
+    container.classList.remove('d-none');
+    container.classList.add('d-flex');
+
+    // Modificar cabecera superior
+    const titleEl = document.getElementById('chat-title');
+    if(titleEl) titleEl.innerText = 'Privacidad';
+    
+    const btnOpts = document.getElementById('chat-options-btn');
+    if(btnOpts) btnOpts.classList.add('d-none');
+
+    // Cambiamos el comportamiento del botón volver para salir de la ventana de bloqueos
+    const btnVolver = document.getElementById('btn-chat-volver');
+    if(btnVolver) {
+        btnVolver.classList.remove('d-none');
+        btnVolver.setAttribute('onclick', 'window.cerrarModalBloqueos()');
+    }
+};
+
+window.cerrarModalBloqueos = function() {
+    const container = document.getElementById('vista-bloqueos');
+    if (container) {
+        container.classList.add('d-none');
+        container.classList.remove('d-flex');
+    }
+    
+    // Restaurar la acción original de la flecha de regresar
+    const btnVolver = document.getElementById('btn-chat-volver');
+    if(btnVolver) btnVolver.setAttribute('onclick', 'window.volverAContactos()');
+    
+    // Forzamos la vuelta al menú principal (Esto limpia la lista automáticamente)
+    window.volverAContactos();
+};
+
+window.toggleBloqueo = function(pin, isBlocked) {
+    let bloqueados = window.ChatManager.obtenerBloqueados();
+    if (isBlocked) {
+        if (!bloqueados.includes(pin)) bloqueados.push(pin);
+    } else {
+        bloqueados = bloqueados.filter(p => p !== pin);
+    }
+    window.ChatManager.guardarBloqueados(bloqueados);
+};
+
+// ============================================================================
+// SISTEMA DE LATIDOS (PING) Y NOTIFICACIONES
+// ============================================================================
+
 window.revisarNotificacionesGlobales = async function() {
     const miPin = obtenerMiPin();
     
-    // 1. NUEVO: Enviar un Latido Silencioso (Ping) para mantenernos 'En Línea' en la BD
+    // 1. Enviar un Latido Silencioso (Ping) para mantenernos 'En Línea' en la BD
     if (miPin) {
         fetch(`${BASE_API}/ping/${miPin}`).catch(() => {});
     }
