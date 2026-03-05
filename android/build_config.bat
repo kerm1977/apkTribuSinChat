@@ -1,3 +1,3 @@
 @echo off
-set "CUSTOM_NAME=Geeko"
+set "CUSTOM_NAME=Altair"
 set "ICON_PATH="

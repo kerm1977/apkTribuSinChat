@@ -1,9 +1,16 @@
+# ==============================================================================
+# ARCHIVO: chat.py
+# ROL: EL HIJO
+# DESCRIPCIÓN: Micro-módulo anidado en tribu.py, maneja la mensajería interna.
+# ==============================================================================
+
 import os
 import sqlite3
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 
+# Este es el blueprint hijo, que se registra dentro de tribu_bp
 chat_bp = Blueprint('chat_api', __name__)
 
 # --- CONFIGURACIÓN ---

@@ -1,23 +1,29 @@
-# app.py
+# ==============================================================================
+# ARCHIVO: tribu.py (Anteriormente app.py del Padre)
+# ROL: EL PADRE (Módulo principal de "La Tribu")
+# DESCRIPCIÓN: Maneja la base de datos dinámica, autenticación, y registra 
+#              a sus propios hijos (como chat.py). Acepta superusuarios dinámicos.
+# ==============================================================================
+
 import os
 import logging
-from flask import Flask, request, jsonify, send_from_directory, make_response
-from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
+from flask import Blueprint, request, jsonify, send_from_directory, make_response
 from flask_bcrypt import Bcrypt
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, MetaData, Table, insert, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-app = Flask(__name__)
-# Habilitar CORS para todas las rutas
-CORS(app)
-bcrypt = Bcrypt(app)
+# 1. Convertimos la app en un Blueprint (El Padre)
+tribu_bp = Blueprint('tribu_bp', __name__)
+
+# Bcrypt se inicializa de forma neutra (el Abuelo le dará el contexto al correr)
+bcrypt = Bcrypt()
 
 # ==========================================
 # CONEXIÓN CON EL HIJO (MÓDULO DE CHAT)
 # ==========================================
+# Importamos el Blueprint del hijo y lo anidamos dentro del padre
 from chat import chat_bp
-app.register_blueprint(chat_bp)
+tribu_bp.register_blueprint(chat_bp)
 
 # --- CONFIGURACIÓN DE RUTAS ---
 # Rutas absolutas en PythonAnywhere
@@ -37,7 +43,7 @@ for path in [BASE_DB_PATH, BASE_UPDATE_PATH]:
 engines = {}
 session_factories = {}
 
-def get_db_session(app_slug):
+def get_db_session(app_slug, superusuarios=None):
     """Recupera o crea la conexión a la base de datos de la App específica"""
     # Limpiamos el slug (solo letras y números) para evitar inyecciones en la ruta
     safe_slug = "".join([c for c in app_slug if c.isalnum()])
@@ -69,13 +75,13 @@ def get_db_session(app_slug):
             Column('apellido1', String(100)),
             Column('pin', String(20)),
             Column('puntos_totales', Integer, default=0),
-            Column('rol', String(20), default='usuario'), # NUEVO: Columna de roles
-            Column('telefono', String(20)),               # NUEVO: Teléfono
-            Column('emg_nombre', String(100)),            # NUEVO: Contacto Emergencia
-            Column('emg_telefono', String(20)),           # NUEVO: Teléfono Emergencia
-            Column('dob_dia', String(4)),                 # NUEVO: Día de nacimiento
-            Column('dob_mes', String(4)),                 # NUEVO: Mes de nacimiento
-            Column('dob_anio', String(4))                 # NUEVO: Año de nacimiento
+            Column('rol', String(20), default='usuario'), 
+            Column('telefono', String(20)),               
+            Column('emg_nombre', String(100)),            
+            Column('emg_telefono', String(20)),           
+            Column('dob_dia', String(4)),                 
+            Column('dob_mes', String(4)),                 
+            Column('dob_anio', String(4))                 
         )
         
         event = Table('event', metadata,
@@ -88,16 +94,13 @@ def get_db_session(app_slug):
         metadata.create_all(engine)
         
         # -- MIGRACIÓN AUTOMÁTICA (Auto-Patch) --
-        # Previene el error: "table user has no column named username"
-        # Si la BD ya existe, intentamos inyectar la columna que falta.
         if db_exists:
             with engine.begin() as conn:
                 try:
                     conn.execute(text("ALTER TABLE user ADD COLUMN username VARCHAR(80)"))
                 except Exception:
-                    pass # Si falla, significa que la columna ya existe, lo cual está bien.
+                    pass 
                 try:
-                    # Parche para inyectar la columna 'rol' en bases de datos viejas
                     conn.execute(text("ALTER TABLE member ADD COLUMN rol VARCHAR(20) DEFAULT 'usuario'"))
                 except Exception:
                     pass
@@ -113,7 +116,6 @@ def get_db_session(app_slug):
                     conn.execute(text("ALTER TABLE member ADD COLUMN emg_telefono VARCHAR(20)"))
                 except Exception:
                     pass
-                # PARCHES NUEVOS PARA LA EDAD
                 try:
                     conn.execute(text("ALTER TABLE member ADD COLUMN dob_dia VARCHAR(4)"))
                 except Exception:
@@ -132,53 +134,42 @@ def get_db_session(app_slug):
             with engine.begin() as conn:
                 try:
                     # ========================================================
-                    # SUPERUSUARIO 1: kenth1977
+                    # INYECCIÓN DINÁMICA DE SUPERUSUARIOS (Recibidos de Node.js)
                     # ========================================================
-                    hashed_pw_1 = bcrypt.generate_password_hash('admin123').decode('utf-8')
-                    # Insertar en tabla user (Auth)
-                    conn.execute(user.insert().values(
-                        username='admin_kenth',
-                        email='kenth1977@gmail.com',
-                        password=hashed_pw_1
-                    ))
-                    # Insertar perfil en tabla member (Frontend)
-                    conn.execute(member.insert().values(
-                        nombre='Administrador',
-                        apellido1='Kenth',
-                        pin='00000000',
-                        puntos_totales=0,
-                        rol='superadmin' # Asignación de rol
-                    ))
+                    if superusuarios:
+                        for idx, su in enumerate(superusuarios, start=1):
+                            # Cifrar contraseña entrante
+                            hashed_pw = bcrypt.generate_password_hash(su['password']).decode('utf-8')
+                            
+                            # Insertar en tabla user (Auth)
+                            conn.execute(user.insert().values(
+                                username=f"admin_sys_{idx}",
+                                email=su['email'],
+                                password=hashed_pw
+                            ))
+                            
+                            # Insertar perfil en tabla member (Frontend)
+                            conn.execute(member.insert().values(
+                                nombre='Administrador',
+                                apellido1=f"{idx}",
+                                pin=su.get('pin', str(idx-1)*8), # Pin automático 00000000, 11111111
+                                puntos_totales=0,
+                                rol='superadmin'
+                            ))
 
-                    # ========================================================
-                    # SUPERUSUARIO 2: lthikingcr
-                    # ========================================================
-                    hashed_pw_2 = bcrypt.generate_password_hash('CR129x7848n').decode('utf-8')
-                    # Insertar en tabla user (Auth)
-                    conn.execute(user.insert().values(
-                        username='admin_lthiking',
-                        email='lthikingcr@gmail.com',
-                        password=hashed_pw_2
-                    ))
-                    # Insertar perfil en tabla member (Frontend)
-                    conn.execute(member.insert().values(
-                        nombre='Administrador',
-                        apellido1='LTHiking',
-                        pin='88888888',
-                        puntos_totales=0,
-                        rol='superadmin' # Asignación de rol
-                    ))
+                        print(f"Base de datos {safe_slug}.db inicializada con {len(superusuarios)} superusuarios dinámicos.")
+                    else:
+                        print(f"Base de datos {safe_slug}.db creada vacía (Sin superusuarios por defecto).")
 
-                    print(f"Base de datos {safe_slug}.db creada e inicializada con 2 superusuarios.")
                 except Exception as e:
-                    print(f"Error insertando seed inicial: {e}")
+                    print(f"Error insertando seed inicial dinámico: {e}")
                     
     return session_factories[safe_slug]()
 
 
 # --- RUTAS DE LA API ---
 
-@app.route('/')
+@tribu_bp.route('/')
 def index():
     """Diagnóstico inicial"""
     try:
@@ -192,11 +183,24 @@ def index():
         "ayuda": "Visita /api/NombreDeTuApp/crear_ahora para generar una nueva base de datos."
     })
 
-@app.route('/api/<app_slug>/crear_ahora')
+@tribu_bp.route('/api/<app_slug>/crear_ahora', methods=['GET', 'POST', 'OPTIONS'])
 def forzar_creacion(app_slug):
-    """DISPARADOR: Esta ruta es la que físicamente crea el archivo .db"""
+    """DISPARADOR: Crea la BD físicamente y recibe los superusuarios desde Node.js"""
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+        
     try:
-        get_db_session(app_slug)
+        superusuarios_entrantes = []
+        
+        # Si la llamada viene del Script de Node.js (POST), extraemos las credenciales
+        if request.method == 'POST':
+            data = request.get_json(silent=True)
+            if data and 'superusuarios' in data:
+                superusuarios_entrantes = data['superusuarios']
+                
+        # Le pasamos los datos a la función que crea la BD
+        get_db_session(app_slug, superusuarios_entrantes)
+        
         return jsonify({
             "status": "ok",
             "mensaje": f"Base de datos para '{app_slug}' lista para usar."
@@ -204,10 +208,9 @@ def forzar_creacion(app_slug):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/<app_slug>/registro', methods=['POST', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/registro', methods=['POST', 'OPTIONS'])
 def registrar_usuario(app_slug):
-    """Endpoint para registrar un nuevo usuario manejando CORS preflight"""
-    
+    """Endpoint para registrar un nuevo usuario"""
     if request.method == 'OPTIONS':
         return jsonify({"status": "ok"}), 200
 
@@ -218,16 +221,13 @@ def registrar_usuario(app_slug):
         
         session = get_db_session(app_slug)
         
-        # --- NUEVA VALIDACIÓN: Verificar si el correo ya existe ---
         usuario_existente = session.execute(
             text("SELECT id FROM user WHERE email = :e"), 
             {"e": data.get('email')}
         ).fetchone()
         
         if usuario_existente:
-            # Si el usuario existe, retornamos un mensaje claro al cliente sin romper la BD
             return jsonify({"error": "El correo ingresado ya se encuentra registrado."}), 400
-        # ----------------------------------------------------------
 
         hashed_pw = bcrypt.generate_password_hash(data['password']).decode('utf-8')
         username_interno = data['email']
@@ -237,7 +237,6 @@ def registrar_usuario(app_slug):
             {"u": username_interno, "e": data['email'], "p": hashed_pw}
         )
         
-        # Agregadas las variables para la edad en base de datos
         session.execute(
             text("INSERT INTO member (nombre, apellido1, pin, puntos_totales, rol, telefono, emg_nombre, emg_telefono, dob_dia, dob_mes, dob_anio) VALUES (:n, :a, :pin, 0, 'usuario', :tel, :emg_n, :emg_t, :d_dia, :d_mes, :d_anio)"),
             {
@@ -267,7 +266,7 @@ def registrar_usuario(app_slug):
         if session:
             session.close()
 
-@app.route('/api/<app_slug>/login', methods=['POST', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/login', methods=['POST', 'OPTIONS'])
 def login_usuario(app_slug):
     """Endpoint real para iniciar sesión y recuperar datos"""
     if request.method == 'OPTIONS':
@@ -278,7 +277,6 @@ def login_usuario(app_slug):
         data = request.json
         session = get_db_session(app_slug)
         
-        # 1. Buscar el usuario por email en tabla 'user'
         user_record = session.execute(
             text("SELECT * FROM user WHERE email = :e"), 
             {"e": data['email']}
@@ -287,11 +285,9 @@ def login_usuario(app_slug):
         if not user_record:
             return jsonify({"error": "Credenciales incorrectas (Usuario no encontrado)"}), 401
             
-        # 2. Verificar contraseña cifrada
         if not bcrypt.check_password_hash(user_record['password'], data['password']):
             return jsonify({"error": "Credenciales incorrectas (Contraseña inválida)"}), 401
             
-        # 3. Obtener los datos del perfil en la tabla 'member'
         member_record = session.execute(
             text("SELECT * FROM member WHERE id = :id"),
             {"id": user_record['id']}
@@ -300,7 +296,6 @@ def login_usuario(app_slug):
         if not member_record:
             return jsonify({"error": "Perfil de usuario incompleto"}), 404
             
-        # 4. Empaquetar los datos para el frontend (Blindados con str() para evitar errores JS)
         usuario_data = {
             "nombre": f"{member_record['nombre']} {member_record['apellido1']}".strip(),
             "email": user_record['email'],
@@ -324,7 +319,7 @@ def login_usuario(app_slug):
         if session:
             session.close()
 
-@app.route('/api/<app_slug>/editar_perfil', methods=['POST', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/editar_perfil', methods=['POST', 'OPTIONS'])
 def editar_perfil(app_slug):
     """Endpoint real para actualizar datos del perfil"""
     if request.method == 'OPTIONS':
@@ -335,7 +330,6 @@ def editar_perfil(app_slug):
         data = request.json
         session = get_db_session(app_slug)
         
-        # 1. Buscamos la ID del usuario usando su correo (que es único)
         user_record = session.execute(
             text("SELECT id FROM user WHERE email = :e"), 
             {"e": data['email']}
@@ -345,9 +339,6 @@ def editar_perfil(app_slug):
             return jsonify({"error": "Usuario no encontrado"}), 404
             
         user_id = user_record['id']
-        
-        # 2. Actualizamos la tabla 'member' en la nube
-        # Concatenamos los dos apellidos para que calcen en la columna apellido1 de tu BD actual
         apellidos_completos = data.get('apellido1', '') + " " + data.get('apellido2', '')
         
         session.execute(
@@ -381,18 +372,13 @@ def editar_perfil(app_slug):
         if session:
             session.close()
 
-# ==============================================================================
-# RUTA PARA OBTENER LA LISTA DE CONTACTOS
-# ==============================================================================
-@app.route('/api/<app_slug>/contactos/<mi_pin>', methods=['GET'])
+@tribu_bp.route('/api/<app_slug>/contactos/<mi_pin>', methods=['GET'])
 def obtener_contactos(app_slug, mi_pin):
     """Devuelve la lista de usuarios y la cantidad de mensajes sin leer"""
     session = None
     try:
-        # Usamos tu motor dinámico existente en lugar de sqlite3 crudo
         session = get_db_session(app_slug)
         
-        # 1. Obtenemos todos los miembros excepto nosotros mismos
         miembros = session.execute(
             text("SELECT id, nombre, apellido1, pin FROM member WHERE pin != :pin"),
             {"pin": mi_pin}
@@ -400,11 +386,9 @@ def obtener_contactos(app_slug, mi_pin):
         
         contactos = []
         for m in miembros:
-            # Evitamos que salga "None" si el usuario no tiene apellido
             apellido = m['apellido1'] if m['apellido1'] else ''
             nombre_completo = f"{m['nombre']} {apellido}".strip()
             
-            # 2. Contamos cuántos mensajes nos ha enviado que no hemos leído
             try:
                 res = session.execute(
                     text("""
@@ -416,7 +400,6 @@ def obtener_contactos(app_slug, mi_pin):
                 ).mappings().fetchone()
                 no_leidos = res['no_leidos']
             except Exception:
-                # Si la tabla de chat no existe aún, son 0
                 no_leidos = 0 
                 
             contactos.append({
@@ -433,10 +416,7 @@ def obtener_contactos(app_slug, mi_pin):
         if session:
             session.close()
 
-# ==============================================================================
-# NUEVO: RUTAS DE ADMINISTRACIÓN BASADAS EN ROLES Y EDICIÓN COMPLETA
-# ==============================================================================
-@app.route('/api/<app_slug>/admin/usuarios', methods=['GET', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/admin/usuarios', methods=['GET', 'OPTIONS'])
 def admin_obtener_usuarios(app_slug):
     """Devuelve la lista completa de usuarios registrados"""
     if request.method == 'OPTIONS':
@@ -446,7 +426,6 @@ def admin_obtener_usuarios(app_slug):
     try:
         session = get_db_session(app_slug)
         
-        # INCLUIMOS EL ROL EN LA CONSULTA
         miembros = session.execute(
             text("SELECT id, nombre, apellido1, pin, rol FROM member ORDER BY id ASC")
         ).mappings().fetchall()
@@ -471,7 +450,7 @@ def admin_obtener_usuarios(app_slug):
         if session:
             session.close()
 
-@app.route('/api/<app_slug>/admin/usuario_detalle/<pin>', methods=['GET', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/admin/usuario_detalle/<pin>', methods=['GET', 'OPTIONS'])
 def admin_usuario_detalle(app_slug, pin):
     """Devuelve absolutamente todos los datos de un usuario para la vista de edición profunda"""
     if request.method == 'OPTIONS': 
@@ -480,12 +459,10 @@ def admin_usuario_detalle(app_slug, pin):
     try:
         session = get_db_session(app_slug)
         
-        # 1. Buscar información pública del perfil en 'member'
         miembro = session.execute(text("SELECT * FROM member WHERE pin = :pin"), {"pin": pin}).mappings().fetchone()
         if not miembro:
             return jsonify({"error": "Usuario no encontrado"}), 404
             
-        # 2. Buscar información privada de cuenta en 'user'
         usuario = session.execute(text("SELECT email FROM user WHERE id = :id"), {"id": miembro['id']}).mappings().fetchone()
         
         return jsonify({
@@ -510,7 +487,7 @@ def admin_usuario_detalle(app_slug, pin):
     finally:
         if session: session.close()
 
-@app.route('/api/<app_slug>/admin/editar_usuario', methods=['POST', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/admin/editar_usuario', methods=['POST', 'OPTIONS'])
 def admin_editar_usuario(app_slug):
     """Actualiza la totalidad de los datos del usuario (Perfil, Configuración y Seguridad)"""
     if request.method == 'OPTIONS': 
@@ -521,9 +498,8 @@ def admin_editar_usuario(app_slug):
         session = get_db_session(app_slug)
         
         editor_pin = data.get('editor_pin')
-        target_pin = data.get('target_pin', data.get('pin')) # Soportamos target_pin explícito o fallback a pin
+        target_pin = data.get('target_pin', data.get('pin'))
 
-        # Obtenemos los roles reales desde la base de datos (Seguridad Anti-Hack)
         editor = session.execute(text("SELECT rol FROM member WHERE pin = :pin"), {"pin": editor_pin}).fetchone()
         target_member = session.execute(text("SELECT * FROM member WHERE pin = :pin"), {"pin": target_pin}).mappings().fetchone()
 
@@ -549,7 +525,7 @@ def admin_editar_usuario(app_slug):
         # --- 1. ACTUALIZAR TABLA MEMBER (Datos Públicos) ---
         nuevo_nombre = data.get('nombre', target_member['nombre'])
         nuevo_apellido = data.get('apellido', target_member['apellido1'])
-        nuevo_pin = data.get('nuevo_pin', data.get('pin', target_pin)) # Permitir cambio de PIN si se solicita
+        nuevo_pin = data.get('nuevo_pin', data.get('pin', target_pin))
         nuevos_puntos = data.get('puntos', target_member['puntos_totales'])
         nuevo_telefono = data.get('telefono', target_member.get('telefono'))
         nuevo_emg_nombre = data.get('emgNombre', target_member.get('emg_nombre'))
@@ -595,7 +571,7 @@ def admin_editar_usuario(app_slug):
     finally:
         if session: session.close()
 
-@app.route('/api/<app_slug>/admin/borrar_usuario/<pin>', methods=['DELETE', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/admin/borrar_usuario/<pin>', methods=['DELETE', 'OPTIONS'])
 def admin_borrar_usuario(app_slug, pin):
     if request.method == 'OPTIONS': 
         return jsonify({"status": "ok"}), 200
@@ -604,7 +580,6 @@ def admin_borrar_usuario(app_slug, pin):
         editor_pin = request.args.get('editor_pin')
         session = get_db_session(app_slug)
         
-        # Validar permisos del que ejecuta la orden
         editor = session.execute(text("SELECT rol FROM member WHERE pin = :pin"), {"pin": editor_pin}).fetchone()
         editor_rol = editor[0] if editor and editor[0] else 'usuario'
         
@@ -633,23 +608,15 @@ def admin_borrar_usuario(app_slug, pin):
     finally:
         if session: session.close()
 
-
-# ==============================================================================
-# RUTA PUENTE PARA DESCARGAR ACTUALIZACIONES DESDE CARPETA PRIVADA
-# ==============================================================================
-@app.route('/descargas_ota/<path:filename>')
+@tribu_bp.route('/descargas_ota/<path:filename>')
 def descargar_ota(filename):
     """Sirve los archivos ZIP de actualización desde la carpeta protegida"""
     response = make_response(send_from_directory(BASE_UPDATE_PATH, filename))
-    # CRÍTICO: Forzar cabeceras CORS para evitar bloqueos del plugin CapacitorUpdater en el móvil
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     return response
 
-# ==============================================================================
-# NUEVO: RUTA PARA ACTUALIZACIONES OTA (Over-The-Air)
-# ==============================================================================
-@app.route('/api/<app_slug>/check_update', methods=['GET', 'OPTIONS'])
+@tribu_bp.route('/api/<app_slug>/check_update', methods=['GET', 'OPTIONS'])
 def check_update(app_slug):
     """Endpoint para que el Frontend sepa si hay una nueva versión de HTML/CSS/JS"""
     if request.method == 'OPTIONS':
@@ -658,21 +625,16 @@ def check_update(app_slug):
     try:
         zip_path = os.path.join(BASE_UPDATE_PATH, 'www.zip')
         
-        # 1. Autogeneramos un "timestamp" leyendo la fecha real en la que subiste el archivo www.zip
-        # Si el archivo no existe en el servidor todavía, mandamos "0" como fallback.
         file_timestamp = "0"
         if os.path.exists(zip_path):
             file_timestamp = str(int(os.path.getmtime(zip_path)))
 
-        # 2. Puedes llenar este arreglo manualmente o dejarlo genérico. 
-        # Esto se mostrará en el modal que acabamos de arreglar en update.js.
         archivos_modificados = [
             "Optimizaciones en la interfaz gráfica",
             "Mejoras de rendimiento y seguridad",
             "Nuevas funciones activadas"
         ]
 
-        # 3. Empaquetamos todo con el status "ok" requerido por el frontend
         update_data = {
             "status": "ok",
             "version": "2.0.0", 
@@ -685,7 +647,3 @@ def check_update(app_slug):
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
