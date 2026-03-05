@@ -1,15 +1,17 @@
 /**
  * chat.js - Lógica para el Enjambre de Chat Privado y Grupal (Basado en Email)
+ * COMPLETADO Y CORREGIDO: Motor de Renderizado, envío multimedia real, emojis y dropups.
  */
 
-// 1. SOLUCIÓN CRÍTICA: Apuntamos al dominio correcto dinámicamente.
-const BASE_API = typeof API_URL !== 'undefined' ? API_URL : "https://kenth1977.pythonanywhere.com/api/Geeko";
+// 1. SOLUCIÓN CRÍTICA: Usamos 'var' en lugar de 'const' para evitar errores de 
+// "Identifier already declared" si la SPA recarga este script dinámicamente.
+var BASE_API = typeof API_URL !== 'undefined' ? API_URL : "https://kenth1977.pythonanywhere.com/api/Geeko";
 
 // Función de ayuda para obtener el CORREO del usuario actual desde localStorage
 function obtenerMiCorreo() {
     try {
         const u = JSON.parse(localStorage.getItem('usuarioActual'));
-        return u ? u.email : null; // Ahora usamos estrictamente el correo
+        return u ? u.email : null; 
     } catch(e) {
         return null;
     }
@@ -25,9 +27,10 @@ function obtenerMiNombre() {
 }
 
 window.ChatManager = {
-    chatActivoCorreo: null,   // Guarda el Correo de la persona o 'GRUPO_LOCAL'
+    chatActivoCorreo: null,   
     chatActivoNombre: null,
-    mensajesCacheados: [], // Guarda la conversación actual para poder Exportarla a TXT
+    mensajesCacheados: [], 
+    intervaloChatActivo: null, 
 
     // ==========================================
     // ALMACENAMIENTO LOCAL (Invisibilidad, Fijados y Grupos)
@@ -63,7 +66,6 @@ window.ChatManager = {
             const data = await res.json();
             let contactos = data.contactos || [];
 
-            // Filtramos a los bloqueados para que no aparezcan en la lista principal
             if (!mostrarTodos) {
                 const bloqueados = this.obtenerBloqueados();
                 contactos = contactos.filter(c => !bloqueados.includes(c.email));
@@ -77,7 +79,6 @@ window.ChatManager = {
         const miCorreo = obtenerMiCorreo();
         if (!miCorreo || !this.chatActivoCorreo) return [];
         
-        // MODO GRUPO: Fusionar chats de múltiples usuarios
         if (this.chatActivoCorreo === 'GRUPO_LOCAL') {
             const correosGrupo = this.obtenerGrupo();
             if (correosGrupo.length === 0) return [];
@@ -88,12 +89,10 @@ window.ChatManager = {
                 let mensajesCombinados = [];
                 resultados.forEach(arr => { if(Array.isArray(arr)) mensajesCombinados = mensajesCombinados.concat(arr); });
                 
-                // Eliminar duplicados (por si acaso se envió a varios y el backend lo repite)
                 const unicos = {};
                 mensajesCombinados.forEach(m => unicos[m.id] = m);
                 mensajesCombinados = Object.values(unicos);
                 
-                // Ordenar por ID ascendente (más viejo a más nuevo) para mantener línea de tiempo real
                 mensajesCombinados.sort((a, b) => a.id - b.id);
                 
                 this.mensajesCacheados = mensajesCombinados;
@@ -101,7 +100,6 @@ window.ChatManager = {
             } catch(e) { return []; }
         }
 
-        // MODO NORMAL: Chat 1 a 1
         try {
             const res = await fetch(`${BASE_API}/chat/${miCorreo}/${this.chatActivoCorreo}`);
             const mensajes = await res.json();
@@ -117,7 +115,6 @@ window.ChatManager = {
 
         if (!miCorreo || !this.chatActivoCorreo) return { error: "No hay chat activo" };
 
-        // MODO GRUPO: Enviar a todos los miembros silenciosamente
         if (this.chatActivoCorreo === 'GRUPO_LOCAL') {
             const correosGrupo = this.obtenerGrupo();
             const promesas = correosGrupo.map(correo => {
@@ -132,17 +129,18 @@ window.ChatManager = {
             
             try {
                 await Promise.all(promesas);
-                return { status: 'ok' }; // Simular éxito si todo sale bien
+                return { status: 'ok' }; 
             } catch(e) { return { error: "Fallo envío grupal" }; }
         }
 
-        // MODO NORMAL
         const formData = new FormData();
         formData.append('nombre', miNombre);
         formData.append('sender_email', miCorreo);
         formData.append('receiver_email', this.chatActivoCorreo);
         formData.append('texto', texto);
-        if (archivo) formData.append('file', archivo);
+        if (archivo) {
+            formData.append('file', archivo);
+        }
 
         try {
             const res = await fetch(`${BASE_API}/chat/enviar`, { method: 'POST', body: formData });
@@ -187,7 +185,6 @@ window.ChatManager = {
         const container = document.getElementById('chat-contacts');
         if (!container) return;
 
-        // INYECCIÓN DE BOTÓN DE GRUPO EN LA BARRA DE BÚSQUEDA
         const searchContainer = document.querySelector('#vista-contactos .input-group');
         if (searchContainer && !document.getElementById('btn-crear-grupo-ui')) {
             const btnGrupo = document.createElement('button');
@@ -207,16 +204,14 @@ window.ChatManager = {
         const fijados = this.obtenerFijados();
         const grupo = this.obtenerGrupo();
 
-        // Ordenar: Fijados arriba
         contactos.sort((a, b) => {
             const aFijado = fijados.includes(a.email);
             const bFijado = fijados.includes(b.email);
             if (aFijado && !bFijado) return -1;
             if (!aFijado && bFijado) return 1;
-            return 0; // Conserva el orden alfabético original
+            return 0; 
         });
 
-        // Insertar el Grupo al principio si existe
         if (grupo.length > 0) {
             contactos.unshift({
                 email: 'GRUPO_LOCAL',
@@ -235,12 +230,10 @@ window.ChatManager = {
             const isFijado = fijados.includes(c.email);
             const pinIcon = isFijado ? '<i class="bi bi-pin-angle-fill text-primary ms-2" title="Fijado"></i>' : '';
 
-            // Punto verde
             const isOnlineStatus = c.is_online
                 ? `<span class="position-absolute bottom-0 end-0 p-1 bg-success border border-white rounded-circle" style="width: 14px; height: 14px; box-shadow: 0 0 5px rgba(25, 135, 84, 0.5);" title="En línea"></span>`
                 : `<span class="position-absolute bottom-0 end-0 p-1 bg-secondary border border-white rounded-circle" style="width: 14px; height: 14px; opacity: 0.5;" title="Desconectado"></span>`;
 
-            // En lugar de mostrar PIN, ahora mostramos el correo si no es un grupo
             const infoSecundaria = c.es_grupo 
                 ? 'Mensajes masivos compartidos' 
                 : `${c.email || 'Sin correo'} | ${c.is_online ? '<span class="text-success fw-medium">En línea</span>' : 'Desconectado'}`;
@@ -288,7 +281,8 @@ window.ChatManager = {
 
             let adjuntoHtml = '';
             if (m.file_path) {
-                const fullUrl = `https://kenth1977.pythonanywhere.com${m.file_path}`;
+                const rootHost = BASE_API.split('/api/')[0];
+                const fullUrl = `${rootHost}${m.file_path}`;
                 if (m.file_type === 'image') {
                     adjuntoHtml = `<img src="${fullUrl}" class="img-fluid rounded-3 mb-2 shadow-sm" style="max-height: 200px; cursor: pointer;" onclick="window.open(this.src)">`;
                 } else if (m.file_type === 'audio') {
@@ -298,17 +292,28 @@ window.ChatManager = {
                 }
             }
 
-            // Identificador de quién envió el mensaje (Útil para el Grupo)
             const nombreRemitente = (!esMio && this.chatActivoCorreo === 'GRUPO_LOCAL') 
                 ? `<small class="text-primary fw-bold d-block mb-1" style="font-size: 0.75rem;">${m.nombre}</small>` 
                 : '';
+
+            let textoMensaje = m.texto || '';
+            if (textoMensaje.includes('📍') && textoMensaje.includes('maps?q=')) {
+                const link = textoMensaje.substring(textoMensaje.indexOf('http'));
+                textoMensaje = `
+                    <div class="text-center mb-2">
+                        <i class="bi bi-geo-alt-fill text-danger" style="font-size: 2rem;"></i><br>
+                        <span class="fw-bold">Ubicación Compartida</span>
+                    </div>
+                    <a href="${link}" target="_blank" class="btn btn-sm btn-light w-100 border text-dark fw-bold">Abrir en el Mapa</a>
+                `;
+            }
 
             html += `
                 <div class="d-flex flex-column ${esMio ? 'align-items-end' : 'align-items-start'} mb-3">
                     <div class="p-3 rounded-4 shadow-sm position-relative" style="max-width: 85%; min-width: 120px; ${esMio ? 'background-color: #0d6efd; color: white;' : 'background-color: white; border: 1px solid #dee2e6; color: #212529;'}">
                         ${nombreRemitente}
                         ${adjuntoHtml}
-                        <p class="mb-0 text-break" style="font-size: 0.95rem; line-height: 1.3;">${m.texto || ''}</p>
+                        ${textoMensaje ? `<p class="mb-0 text-break" style="font-size: 0.95rem; line-height: 1.3;">${textoMensaje}</p>` : ''}
                         
                         <div class="text-end mt-1 d-flex align-items-center justify-content-end" style="margin-bottom: -5px;">
                             <small class="${esMio ? 'text-white-50' : 'text-muted'}" style="font-size: 0.65rem;">${m.fecha || ''}</small>
@@ -321,7 +326,6 @@ window.ChatManager = {
 
         const newContent = html || '<div class="text-center text-muted py-5"><i class="bi bi-chat-dots fs-1 d-block mb-2"></i>Inicia la conversación.</div>';
 
-        // SISTEMA ANTI-PARPADEO
         if (container.dataset.lastContent !== newContent) {
             const estabaAlFinal = container.scrollTop + container.clientHeight >= container.scrollHeight - 50;
             container.innerHTML = newContent;
@@ -335,6 +339,38 @@ window.ChatManager = {
 // FUNCIONES DE NAVEGACIÓN Y MENÚ
 // ============================================================================
 
+// 🔥 SOLUCIÓN DEFINITIVA: NO SOBRESCRIBIR TU CÓDIGO 🔥
+// Eliminé 'window.abrirModalChat' de este archivo porque tú ya la tienes en tu SPA original.
+// Al ponerla aquí yo te estaba destruyendo el botón flotante.
+// En su lugar, simplemente usamos este "observador invisible" que detecta cuando TU código abre el modal, y ahí inyectamos los contactos.
+document.addEventListener('shown.bs.modal', async function (event) {
+    if (event.target.id === 'modalChat') {
+        try {
+            const contactos = await window.ChatManager.obtenerContactos();
+            window.ChatManager.renderizarContactos(contactos);
+        } catch(e) {
+            console.error("Error al cargar contactos:", e);
+        }
+    }
+});
+
+window.seleccionarContacto = function(correo, nombre) {
+    window.abrirChatPrivado(correo, nombre);
+};
+
+window.refrescarChat = async function() {
+    if (!window.ChatManager.chatActivoCorreo) return;
+    const mensajes = await window.ChatManager.obtenerMensajesPrivados();
+    window.ChatManager.renderizarMensajes(mensajes, 'chat-window');
+};
+
+window.cerrarChatGlobal = function() {
+    window.ChatManager.chatActivoCorreo = null;
+    if (window.ChatManager.intervaloChatActivo) {
+        clearInterval(window.ChatManager.intervaloChatActivo);
+    }
+};
+
 window.abrirChatPrivado = function(correo, nombre) {
     window.ChatManager.chatActivoCorreo = correo;
     window.ChatManager.chatActivoNombre = nombre;
@@ -343,28 +379,25 @@ window.abrirChatPrivado = function(correo, nombre) {
     if(titleEl) titleEl.innerText = nombre;
     
     document.getElementById('vista-contactos').classList.add('d-none');
+    document.getElementById('vista-contactos').classList.remove('d-block');
     document.getElementById('vista-chat').classList.remove('d-none');
     document.getElementById('vista-chat').classList.add('d-flex');
     document.getElementById('btn-chat-volver').classList.remove('d-none');
     
-    // Configuración del MENÚ DE 3 PUNTITOS (Dinámico)
     const btnOpts = document.getElementById('chat-options-btn');
     if(btnOpts) {
         btnOpts.classList.remove('d-none');
         const dropdown = btnOpts.querySelector('.dropdown-menu');
         
         if (dropdown) {
-            // Limpiar inyecciones anteriores
             dropdown.querySelectorAll('.dynamic-chat-opt').forEach(e => e.remove());
 
             if (correo === 'GRUPO_LOCAL') {
-                // OPCIONES DE GRUPO
                 const liGrp = document.createElement('li');
                 liGrp.className = 'dynamic-chat-opt';
                 liGrp.innerHTML = `<a class="dropdown-item py-2 text-danger fw-bold" href="#" onclick="window.disolverGrupo()"><i class="bi bi-x-octagon-fill me-2"></i> Disolver Grupo</a>`;
                 dropdown.insertBefore(liGrp, dropdown.firstChild);
             } else {
-                // OPCIONES DE USUARIO 1 a 1
                 const isFijado = window.ChatManager.obtenerFijados().includes(correo);
                 
                 const liBlock = document.createElement('li');
@@ -378,7 +411,6 @@ window.abrirChatPrivado = function(correo, nombre) {
                 dropdown.insertBefore(liFijar, dropdown.firstChild);
             }
 
-            // PARCHE INFAIBLE PARA BOOTSTRAP DROPDOWN
             const btnThreeDots = btnOpts.querySelector('button');
             if (btnThreeDots && !btnThreeDots.dataset.fixed) {
                 btnThreeDots.dataset.fixed = "true";
@@ -398,16 +430,54 @@ window.abrirChatPrivado = function(correo, nombre) {
         }
     }
 
+    const btnClip = document.getElementById('btn-adjunto-menu');
+    if (btnClip && !btnClip.dataset.fixed) {
+        btnClip.dataset.fixed = "true";
+        btnClip.removeAttribute('data-bs-toggle'); 
+        
+        btnClip.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const dropdownClip = btnClip.nextElementSibling;
+            if (dropdownClip) dropdownClip.classList.toggle('show'); 
+        });
+
+        document.addEventListener('click', (e) => {
+            const dropdownClip = btnClip ? btnClip.nextElementSibling : null;
+            if (dropdownClip && !btnClip.contains(e.target) && !dropdownClip.contains(e.target)) {
+                dropdownClip.classList.remove('show');
+            }
+        });
+
+        const dropdownClip = btnClip.nextElementSibling;
+        if (dropdownClip) {
+            dropdownClip.addEventListener('click', () => {
+                dropdownClip.classList.remove('show');
+            });
+        }
+    }
+
     const chatWin = document.getElementById('chat-window');
     if(chatWin) {
-        chatWin.innerHTML = '';
+        chatWin.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div></div>';
         chatWin.dataset.lastContent = '';
     }
-    if (window.refrescarChat) window.refrescarChat();
+    
+    window.refrescarChat();
+    
+    if (window.ChatManager.intervaloChatActivo) clearInterval(window.ChatManager.intervaloChatActivo);
+    window.ChatManager.intervaloChatActivo = setInterval(() => {
+        if (!document.getElementById('vista-chat').classList.contains('d-none')) {
+            window.refrescarChat();
+        } else {
+            clearInterval(window.ChatManager.intervaloChatActivo);
+        }
+    }, 2500); 
 };
 
-window.volverAContactos = function() {
+window.volverAContactos = async function() {
     window.ChatManager.chatActivoCorreo = null;
+    if (window.ChatManager.intervaloChatActivo) clearInterval(window.ChatManager.intervaloChatActivo);
     
     const titleEl = document.getElementById('chat-title');
     if(titleEl) titleEl.innerText = 'Mensajes';
@@ -415,12 +485,17 @@ window.volverAContactos = function() {
     document.getElementById('vista-chat').classList.add('d-none');
     document.getElementById('vista-chat').classList.remove('d-flex');
     document.getElementById('vista-contactos').classList.remove('d-none');
+    document.getElementById('vista-contactos').classList.add('d-block');
     document.getElementById('btn-chat-volver').classList.add('d-none');
 
     const btnOpts = document.getElementById('chat-options-btn');
     if(btnOpts) btnOpts.classList.add('d-none');
     
-    if (window.refrescarChat) window.refrescarChat();
+    const picker = document.getElementById('emoji-picker');
+    if(picker) picker.classList.add('d-none');
+
+    const contactos = await window.ChatManager.obtenerContactos();
+    window.ChatManager.renderizarContactos(contactos);
 };
 
 // ============================================================================
@@ -433,7 +508,6 @@ window.toggleFijar = function(correo) {
     else fijados.push(correo);
     window.ChatManager.guardarFijados(fijados);
     
-    // Refrescar menú visualmente abriéndolo rápido de nuevo
     window.abrirChatPrivado(correo, window.ChatManager.chatActivoNombre);
 };
 
@@ -514,7 +588,6 @@ window.abrirModalBloqueos = async function() {
     `;
 
     contactos.forEach(c => {
-        // PROTECCIÓN DE SUPERADMINS: Ahora validamos dinámicamente por rol, olvidándonos de los pines hardcodeados
         const esSuperAdmin = (c.rol === 'superadmin');
         if (esSuperAdmin) return;
 
@@ -549,7 +622,7 @@ window.abrirModalGrupo = async function() {
         document.querySelector('#modalChat .modal-body').appendChild(container);
     }
 
-    const contactos = await window.ChatManager.obtenerContactos(false); // Solo no bloqueados
+    const contactos = await window.ChatManager.obtenerContactos(false);
     const grupo = window.ChatManager.obtenerGrupo();
 
     let html = `
@@ -586,6 +659,7 @@ window.abrirModalGrupo = async function() {
 
 function cambiarAVistaEspecial(titulo) {
     document.getElementById('vista-contactos').classList.add('d-none');
+    document.getElementById('vista-contactos').classList.remove('d-block');
     const vistaChat = document.getElementById('vista-chat');
     if(vistaChat) { vistaChat.classList.add('d-none'); vistaChat.classList.remove('d-flex'); }
     
@@ -627,6 +701,134 @@ window.toggleGrupo = function(correo, isAdded) {
     if (isAdded) { if (!grupo.includes(correo)) grupo.push(correo); } 
     else { grupo = grupo.filter(p => p !== correo); }
     window.ChatManager.guardarGrupo(grupo);
+};
+
+// ============================================================================
+// NUEVO: GESTIÓN DE ADJUNTOS, CÁMARA, GPS Y EMOJIS
+// ============================================================================
+
+window.actualizarEstadoAdjunto = function(input) {
+    const btnMenu = document.getElementById('btn-adjunto-menu');
+    if (input.files && input.files[0]) {
+        window.tempFile = input.files[0];
+        
+        if (btnMenu) {
+            btnMenu.classList.add('bg-success', 'text-white');
+            btnMenu.classList.remove('btn-light');
+            btnMenu.innerHTML = '<i class="bi bi-check2 fs-5"></i>';
+        }
+    } else {
+        window.tempFile = null;
+        if (btnMenu) {
+            btnMenu.classList.remove('bg-success', 'text-white');
+            btnMenu.classList.add('btn-light');
+            btnMenu.innerHTML = '<i class="bi bi-paperclip fs-5"></i>';
+        }
+    }
+};
+
+window.enviarAccionChat = async function() {
+    const input = document.getElementById('chat-msg-input');
+    const txt = input ? input.value.trim() : '';
+    const file = window.tempFile;
+    
+    if (!txt && !file) return;
+
+    const btn = document.querySelector('#modalChat .bi-send-fill').parentNode;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    }
+
+    const res = await window.ChatManager.enviarMensaje(txt, file);
+    
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send-fill"></i>';
+    }
+
+    if (res && res.status === 'ok') {
+        if (input) input.value = '';
+        window.tempFile = null;
+        
+        const fileGaleria = document.getElementById('chat-file');
+        const fileCamara = document.getElementById('chat-camera-input');
+        if (fileGaleria) fileGaleria.value = '';
+        if (fileCamara) fileCamara.value = '';
+
+        window.actualizarEstadoAdjunto({files: []});
+        
+        const picker = document.getElementById('emoji-picker');
+        if (picker) picker.classList.add('d-none');
+
+        await window.refrescarChat();
+    }
+};
+
+window.enviarUbicacion = function() {
+    if (!navigator.geolocation) {
+        return alert("Tu dispositivo no soporta compartir ubicación.");
+    }
+    
+    const btnMenu = document.getElementById('btn-adjunto-menu');
+    const dropdown = btnMenu ? btnMenu.nextElementSibling : null;
+    if (dropdown) dropdown.classList.remove('show');
+
+    const btnSend = document.querySelector('#modalChat .bi-send-fill').parentNode;
+    if (btnSend) {
+        btnSend.disabled = true;
+        btnSend.innerHTML = '<span class="spinner-border spinner-border-sm text-primary" role="status"></span>';
+    }
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const mapsLink = `📍 Mi ubicación actual: https://www.google.com/maps?q=${lat},${lng}`;
+        
+        const res = await window.ChatManager.enviarMensaje(mapsLink, null);
+        
+        if (btnSend) {
+            btnSend.disabled = false;
+            btnSend.innerHTML = '<i class="bi bi-send-fill"></i>';
+        }
+        
+        if (res && res.status === 'ok') {
+            await window.refrescarChat();
+        }
+    }, (error) => {
+        if (btnSend) {
+            btnSend.disabled = false;
+            btnSend.innerHTML = '<i class="bi bi-send-fill"></i>';
+        }
+        alert("No pudimos obtener la ubicación. Verifica que el GPS (Ubicación) de tu teléfono esté encendido.");
+    }, { enableHighAccuracy: true, timeout: 10000 });
+};
+
+window.toggleEmojiPicker = function() {
+    const picker = document.getElementById('emoji-picker');
+    if (!picker) return;
+    
+    if (picker.classList.contains('d-none')) {
+        if (picker.children.length === 0) {
+            const populares = ['😀','😂','🤣','🥰','😍','😎','🥺','😭','😡','🤔','😬','🥳','💩','🤡','👻','👽','🚀','⭐','🔥','👍','👎','👏','🙏','🍻','⚽','🏔️','⛺','📍','🎉','❤️','💔'];
+            let html = '';
+            populares.forEach(e => {
+                html += `<span style="font-size: 1.5rem; cursor: pointer; text-align: center; transition: transform 0.1s;" onclick="window.agregarEmoji('${e}')" onmousedown="this.style.transform='scale(0.8)'" onmouseup="this.style.transform='scale(1)'">${e}</span>`;
+            });
+            picker.innerHTML = html;
+        }
+        picker.classList.remove('d-none');
+    } else {
+        picker.classList.add('d-none');
+    }
+};
+
+window.agregarEmoji = function(emoji) {
+    const input = document.getElementById('chat-msg-input');
+    if(input) {
+        input.value += emoji;
+        input.focus();
+    }
 };
 
 // ============================================================================
