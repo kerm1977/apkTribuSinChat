@@ -1,0 +1,1522 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendario - La Tribu</title>
+    
+    <!-- Bootstrap CSS Local -->
+    <link href="css/bootstrap.css" rel="stylesheet">
+    <link href="css/bootstrap-icons.css" rel="stylesheet">
+    <link href="css/custom.css" rel="stylesheet">
+    <script src="js/html2canvas.min.js"></script>
+
+    <style>
+        /* TEMA LIGHT MÓVIL Y ESTÉTICO - FLUJO NATURAL SIN EFECTO BOX */
+        :root {
+            --bg-light: #f4f7f6;
+            --warning-main: #ffc107;
+            --warning-hover: #e0a800;
+            --text-dark: #2c3e50;
+            --text-muted: #6c757d;
+            --border-color: #dce1e6;
+        }
+
+        body {
+            background-color: var(--bg-light);
+            color: var(--text-dark);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow-x: hidden;
+            transition: font-size 0.2s ease; /* Para accesibilidad */
+            font-size: 100%;
+        }
+
+        /* Utilidades */
+        .text-warning-custom { color: #d39e00 !important; } 
+        .bg-warning-custom { background-color: var(--warning-main) !important; color: #000 !important; }
+        
+        .app-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: transparent;
+        }
+
+        /* BUSCADOR */
+        .search-wrapper .input-group-text {
+            background-color: transparent;
+            border-right: none;
+            color: var(--warning-main);
+        }
+        .search-wrapper .form-control {
+            border-left: none;
+            box-shadow: none !important;
+        }
+        .search-wrapper .form-control:focus {
+            border-color: #ced4da;
+        }
+        .search-wrapper {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            background: #fff;
+            border: 1px solid var(--border-color);
+        }
+
+        /* LISTA NATURAL */
+        .lista-contenedor {
+            background: transparent;
+            margin-bottom: 2rem;
+        }
+
+        .mes-separador {
+            color: #b58500;
+            font-weight: 800;
+            text-transform: uppercase;
+            padding: 0.6rem 0.5rem;
+            margin-top: 1.5rem;
+            border-bottom: 2px solid var(--warning-main);
+            letter-spacing: 1px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .mes-separador:hover { background-color: rgba(255, 193, 7, 0.1); }
+        .mes-separador .fa-chevron-down { transition: transform 0.3s ease; }
+        .mes-separador[aria-expanded="false"] .fa-chevron-down { transform: rotate(-90deg); }
+
+        .item-actividad {
+            padding: 1rem 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            transition: transform 0.2s, opacity 0.2s;
+            cursor: pointer;
+            background: transparent;
+        }
+        .item-actividad:hover { opacity: 0.8; transform: translateX(4px); background-color: rgba(255,255,255,0.5); }
+
+        /* Enlaces e items en una sola línea fluida con Space-Between */
+        .item-linea-principal {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            width: 100%;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .item-linea-izq, .item-linea-der {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .act-nombre { color: #d39e00; font-weight: 700; font-size: 1.05em; }
+        .act-tipo { color: var(--text-muted); font-size: 0.85em; }
+        .act-fecha { font-weight: 600; font-size: 0.9em; color: var(--text-dark); }
+        .act-precio { color: #198754; font-weight: 800; font-size: 0.95em; }
+        
+        .act-sublinea { 
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.85em; color: var(--text-muted); margin-top: 0.4rem; 
+        }
+        .act-sublinea > div { flex: 1; }
+
+        /* Modales */
+        .modal-content { border: none; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        .modal-header { border-bottom: 1px solid #e9ecef; background-color: #ffffff; border-radius: 12px 12px 0 0; }
+        .modal-backdrop {
+            background-color: rgba(15, 23, 42, 0.6) !important;
+            backdrop-filter: blur(5px) !important; -webkit-backdrop-filter: blur(5px) !important;
+            opacity: 1 !important;
+        }
+        .modal-backdrop.fade:not(.show) { opacity: 0 !important; }
+        
+        /* Imagen dinámica */
+        .flyer-preview { width: 100%; height: auto; border-radius: 8px; margin-bottom: 15px; }
+
+        /* Selector de Colores (Bolitas) */
+        .color-swatch {
+            width: 45px; height: 45px; border-radius: 50%;
+            display: inline-block; cursor: pointer; margin: 5px;
+            border: 3px solid transparent; transition: transform 0.2s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .color-swatch:hover { transform: scale(1.1); }
+        .color-swatch.active { border-color: #2c3e50; transform: scale(1.1); }
+
+        /* CONTENEDORES EXPORTACIÓN OFF-SCREEN */
+        #exportContainer, #exportVistaContainer {
+            position: absolute; left: -9999px; top: 0; width: 800px;
+            background-color: var(--bg-light); padding: 30px; color: var(--text-dark);
+        }
+        
+        /* ESTILOS INTERNOS DEL CARD (Visible en el Modal) */
+        .card-export-header {
+            padding: 20px; text-align: center; border-bottom: 4px solid rgba(0,0,0,0.1);
+            transition: background-color 0.3s, color 0.3s;
+        }
+        
+        /* Ajuste dinámico de Flyer en exportación */
+        .card-export-flyer { width: 100%; height: auto; display: block; background: transparent; }
+        
+        .card-export-body { padding: 25px; }
+        
+        .info-pill {
+            background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.1); border-radius: 20px;
+            padding: 5px 12px; font-size: 0.85em; display: inline-block; margin: 3px;
+            color: #111; font-weight: bold;
+        }
+        .incluye-pill {
+            background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 4px;
+            padding: 3px 8px; font-size: 0.75em; display: inline-block; margin: 2px;
+            color: inherit; font-weight: 500;
+        }
+        
+        .card-export-footer {
+            text-align: center; padding: 15px; font-weight: 900; font-size: 0.9em;
+            transition: background-color 0.3s, color 0.3s;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Botón Volver Atrás -->
+<button onclick="window.goBack()" class="btn btn-light rounded-circle position-fixed shadow" 
+        style="top: 20px; left: 20px; z-index: 1000; width: 50px; height: 50px;">
+    <i class="bi bi-arrow-left"></i>
+</button>
+
+<div class="container app-container py-4">
+    <!-- Encabezado y Toolbar -->
+    <div class="row mb-3 align-items-center">
+        <div class="col-12 col-md-6 text-center text-md-start mb-3 mb-md-0">
+            <h2 class="text-warning-custom fw-bold m-0"><i class="fa-solid fa-calendar-days"></i> Calendario</h2>
+            <small class="text-muted fw-bold">La Tribu de los Libres</small>
+        </div>
+        <div class="col-12 col-md-6 text-center text-md-end">
+            <div class="d-inline-flex gap-2 flex-wrap justify-content-center">
+                <button class="btn btn-warning btn-sm shadow-sm px-3 fw-bold" onclick="abrirModalAgregar()">
+                    <i class="fa-solid fa-plus"></i> Agregar
+                </button>
+                
+                <!-- Botón Opciones con Accesibilidad y Color -->
+                <div class="dropdown d-inline-block">
+                    <button class="btn btn-light border btn-sm dropdown-toggle shadow-sm px-3 text-dark fw-bold" type="button" data-bs-toggle="dropdown">
+                        <i class="fa-solid fa-bars"></i> Opciones
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow border-0" style="min-width: 230px;">
+                        <li><h6 class="dropdown-header text-warning-custom"><i class="fa-solid fa-eye"></i> Visualización</h6></li>
+                        <li><a class="dropdown-item" href="#" onclick="toggleColapsarTodo()"><i class="fa-solid fa-layer-group text-muted w-20px"></i> <span id="textoColapsar">Colapsar Todo</span></a></li>
+                        <li>
+                            <div class="dropdown-item d-flex justify-content-between align-items-center" onclick="event.stopPropagation();">
+                                <span class="text-muted"><i class="fa-solid fa-text-height"></i> Tamaño Letra</span>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-secondary px-2" onclick="cambiarTamanoFuente(-10)">A-</button>
+                                    <button class="btn btn-outline-secondary px-2" onclick="cambiarTamanoFuente(10)">A+</button>
+                                </div>
+                            </div>
+                        </li>
+                        <li><a class="dropdown-item" href="#" onclick="abrirModalColorCard()"><i class="fa-solid fa-palette text-muted w-20px"></i> Color de Card PNG</a></li>
+                        
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header text-warning-custom"><i class="fa-solid fa-file-export"></i> Exportaciones</h6></li>
+                        <li><a class="dropdown-item" href="#" onclick="exportarVistaPNG()"><i class="fa-solid fa-camera text-muted w-20px"></i> Capturar Vista Actual (PNG)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="abrirModalExportar()"><i class="fa-solid fa-list text-muted w-20px"></i> Exportar Lista General</a></li>
+                        
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header text-warning-custom"><i class="fa-solid fa-database"></i> Datos (JSON)</h6></li>
+                        <li><a class="dropdown-item" href="#" onclick="exportarJSON()"><i class="fa-solid fa-download text-muted w-20px"></i> Respaldar</a></li>
+                        <li>
+                            <label class="dropdown-item mb-0" style="cursor: pointer;">
+                                <i class="fa-solid fa-upload text-muted w-20px"></i> Restaurar
+                                <input type="file" id="importJsonInput" accept=".json" class="d-none" onchange="importarJSON(event)">
+                            </label>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Buscador en Vivo -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="input-group search-wrapper">
+                <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input type="text" id="buscadorInput" class="form-control" placeholder="Buscar por mes, actividad, precio o tipo..." onkeyup="ejecutarFiltroBusqueda()">
+            </div>
+        </div>
+    </div>
+
+    <!-- Lista de Actividades -->
+    <div id="listaActividades" class="lista-contenedor pb-3">
+        <div id="contenedorItems"></div>
+        <div class="col-12 text-center text-muted py-5 d-none" id="emptyState">
+            <i class="fa-solid fa-campground fa-3x mb-3 text-warning opacity-50"></i>
+            <p id="emptyMsg">No hay actividades programadas. ¡Agrega una nueva aventura!</p>
+        </div>
+    </div>
+</div>
+
+<!-- ========================================== -->
+<!-- MODALES -->
+<!-- ========================================== -->
+
+<!-- Modal Agregar/Editar Actividad -->
+<div class="modal fade" id="modalActividad" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-warning-custom fw-bold" id="modalActividadTitle"><i class="fa-solid fa-pen"></i> Nueva Actividad</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body bg-light p-3">
+                <form id="formActividad">
+                    <input type="hidden" id="actId">
+                    
+                    <div class="mb-3">
+                        <label class="form-label text-dark small fw-bold">Nombre de la Actividad</label>
+                        <input type="text" class="form-control form-control-sm" id="actNombre" required onblur="this.value = toTitleCase(this.value)">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-dark small fw-bold">Flyer / Imagen Promocional</label>
+                        <input type="file" class="form-control form-control-sm" id="actFlyer" accept="image/*">
+                        <input type="hidden" id="actFlyerBase64">
+                    </div>
+
+                    <div class="mb-3 border-top pt-3">
+                        <label class="form-label text-dark small fw-bold">Tipo de Actividad</label>
+                        <select class="form-select form-select-sm" id="actTipo" required onchange="toggleCampos()">
+                            <option value="Parque Nacional">Parque Nacional</option>
+                            <option value="El Camino de Costa Rica">El Camino de Costa Rica</option>
+                            <option value="Difícil">Difícil</option>
+                            <option value="Intermedia">Intermedia</option>
+                            <option value="Básica">Básica</option>
+                            <option value="Principiante">Principiante</option>
+                            <option value="Internacional">Internacional</option>
+                            <option value="Paseo">Paseo</option>
+                            <option value="Taller">Taller</option>
+                            <option value="Técnica">Técnica</option>
+                            <option value="Avanzada">Avanzada</option>
+                            <option value="Convivio">Convivio</option>
+                            <option value="Fiesta Aniversario">Fiesta Aniversario</option>
+                            <option value="Suspendida" class="text-danger fw-bold">Suspendida</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3 d-none" id="divDestinoInt">
+                        <label class="form-label text-dark small fw-bold">Destino Internacional</label>
+                        <select class="form-select form-select-sm" id="actDestinoInt">
+                            <option value="Panamá">Panamá</option>
+                            <option value="Nicaragua">Nicaragua</option>
+                            <option value="Guatemala">Guatemala</option>
+                            <option value="Honduras">Honduras</option>
+                            <option value="El Salvador">El Salvador</option>
+                            <option value="Colombia">Colombia</option>
+                            <option value="Peru">Perú</option>
+                            <option value="España">España</option>
+                            <option value="México">México</option>
+                        </select>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Moneda</label>
+                            <select class="form-select form-select-sm" id="actMoneda">
+                                <option value="¢">¢</option>
+                                <option value="$">$</option>
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Precio</label>
+                            <input type="number" class="form-control form-control-sm" id="actPrecio" min="0" required>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Reserva</label>
+                            <input type="number" class="form-control form-control-sm" id="actReserva" min="0" placeholder="Ej: 5000">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3 border-bottom pb-3">
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Capacidad</label>
+                            <select class="form-select form-select-sm" id="actCapacidad">
+                                <option value="14-17">14-17</option>
+                                <option value="18-31">18-31</option>
+                                <option value="32+">32+</option>
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Cant. Días</label>
+                            <input type="number" class="form-control form-control-sm" id="actDias" min="1" value="1" required oninput="toggleCampos()">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label text-dark small fw-bold">Acompañante</label>
+                            <select class="form-select form-select-sm" id="actAcompanante" onchange="toggleAcompanante()">
+                                <option value="No">No</option>
+                                <option value="Sí">Sí</option>
+                            </select>
+                        </div>
+                        <div class="col-12 mt-2 d-none" id="divAcompananteDesc">
+                            <input type="text" class="form-control form-control-sm" id="actAcompananteDesc" placeholder="Describa la situación del acompañante... (Opcional)">
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN: SALIDA Y REGRESO -->
+                    <h6 class="text-warning-custom fw-bold">Logística</h6>
+                    <div class="mb-2">
+                        <label class="form-label small">Fecha de Salida (Día, Mes, Año)</label>
+                        <div class="d-flex gap-2">
+                            <select class="form-select form-select-sm" id="salidaDia" required></select>
+                            <select class="form-select form-select-sm" id="salidaMes" required></select>
+                            <select class="form-select form-select-sm" id="salidaAnio" required></select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">Hora de Salida</label>
+                        <input type="time" class="form-control form-control-sm" id="salidaHora" required>
+                    </div>
+
+                    <div class="mb-3" id="divLugarSalida">
+                        <label class="form-label small">Lugar de Salida</label>
+                        <select class="form-select form-select-sm" id="salidaLugar">
+                            <option value="Parque de Tres Ríos - Escuela">Parque de Tres Ríos - Escuela</option>
+                            <option value="Parque de Tres Ríos - Cruz Roja">Parque de Tres Ríos - Cruz Roja</option>
+                            <option value="Parque de Tres Ríos - Letras">Parque de Tres Ríos - Letras</option>
+                        </select>
+                    </div>
+
+                    <div id="divRegreso" class="d-none bg-white p-2 border rounded mb-3">
+                        <h6 class="text-dark small fw-bold mt-1">Regreso</h6>
+                        <div class="mb-2">
+                            <div class="d-flex gap-2">
+                                <select class="form-select form-select-sm" id="regresoDia"></select>
+                                <select class="form-select form-select-sm" id="regresoMes"></select>
+                                <select class="form-select form-select-sm" id="regresoAnio"></select>
+                            </div>
+                        </div>
+                        <div class="mb-1">
+                            <label class="form-label small">Hora de Regreso</label>
+                            <input type="time" class="form-control form-control-sm" id="regresoHora">
+                        </div>
+                    </div>
+                    
+                    <!-- NUEVA SECCIÓN DE INCLUYE (Formateada para Bootstrap) -->
+                    <div class="mb-3 border p-3 rounded bg-white border-success-subtle shadow-sm">
+                        <h6 class="text-success fw-bold border-bottom pb-1"><i class="fa-solid fa-check-double"></i> Incluye</h6>
+                        <div class="row g-2 mb-2 text-dark small" id="divCheckboxesIncluye">
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Transporte"> Transporte</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Lancha"> Lancha</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Desayuno"> Desayuno</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Café"> Café</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Almuerzo"> Almuerzo</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Refrigerio"> Refrigerio</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Cena"> Cena</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Guías"> Guías</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Pasaporte"> Pasaporte</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Entrada"> Entrada</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Reconocimiento"> Reconocimiento</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Rifas"> Rifas</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Estadía"> Estadía</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Ducha"> Ducha</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Serv. Sanitarios"> Serv. Sanitarios</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Impuestos"> Impuestos</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Tiquetes Aéreos"> Tiquetes Aéreos</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Zona de Camping"> Zona de Camping</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Póliza de Viajero"> Póliza Viajero</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Taxi/Uber/Otro"> Taxi/Uber/Otro</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Acarreo"> Acarreo</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Guías Certificados"> Guías Certific.</label></div>
+                            <div class="col-6 col-sm-4"><label><input type="checkbox" name="incluye" value="Otros" id="checkOtros" onchange="toggleOtherDesc()"> Otros</label></div>
+                        </div>
+                        <div id="otrosDescContainer" class="d-none mt-2">
+                            <label class="block small fw-bold mb-1 text-dark">Descripción de Otros:</label>
+                            <input type="text" id="otrosDescripcion" class="form-control form-control-sm" placeholder="Especifique qué más incluye...">
+                        </div>
+                    </div>
+
+                    <!-- NUEVA SECCIÓN DE PAGOS -->
+                    <h6 class="text-warning-custom fw-bold border-top pt-3">Métodos de Pago</h6>
+                    <div class="mb-3">
+                        <label class="form-label text-dark small fw-bold mb-1">SINPE</label>
+                        <select id="actSinpe" class="form-select form-select-sm focus-ring focus-ring-warning">
+                            <option value="86529837 - Jenny Ceciliano Cordoba">86529837 - Jenny Ceciliano Cordoba</option>
+                            <option value="87984232 - Jenny Ceciliano Cordoba">87984232 - Jenny Ceciliano Cordoba</option>
+                            <option value="86227500 - Kenneth Ruiz Matamoros">86227500 - Kenneth Ruiz Matamoros</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-2">
+                        <label class="form-label text-dark small fw-bold mb-1">CUENTAS</label>
+                        <select id="actCuenta" class="form-select form-select-sm focus-ring focus-ring-warning">
+                            <option value="Ninguna">-- Ninguna / Solo usar SINPE --</option>
+                            <option value="Jenny Ceciliano Cordoba (Colones MUCAP) - CR66080402010100715103">Jenny Ceciliano Cordoba (Colones MUCAP) - CR66080402010100715103</option>
+                            <option value="Jenny Ceciliano Cordoba (Colones BCR) - CR62015202001268129163">Jenny Ceciliano Cordoba (Colones BCR) - CR62015202001268129163</option>
+                            <option value="Kenneth Ruiz Matamoros (Colones MUCAP) - CR19080403012501524778">Kenneth Ruiz Matamoros (Colones MUCAP) - CR19080403012501524778</option>
+                            <option value="Juan Carlos Ruiz (Colones BCR) - CR61015202001292863793">Juan Carlos Ruiz (Colones BCR) - CR61015202001292863793</option>
+                            <option value="Juan Carlos Ruiz (Dolares BCR) - CR50015202001410361158">Juan Carlos Ruiz (Dolares BCR) - CR50015202001410361158</option>
+                        </select>
+                    </div>
+                    
+                    <!-- DETALLES ADICIONALES (Al final) -->
+                    <h6 class="text-warning-custom fw-bold border-top pt-3 mt-3">Información Adicional</h6>
+                    <div class="mb-3">
+                        <label class="form-label text-dark small fw-bold">Detalles de la Actividad</label>
+                        <textarea class="form-control form-control-sm" id="actDetalles" rows="3" placeholder="Itinerario, recomendaciones extra..."></textarea>
+                    </div>
+
+                </form>
+            </div>
+            <div class="modal-footer bg-white">
+                <button type="button" class="btn btn-light border btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-warning btn-sm fw-bold" onclick="guardarActividad()">Guardar Actividad</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Selector de Color de Card PNG -->
+<div class="modal fade" id="modalColorCard" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title fw-bold text-dark"><i class="fa-solid fa-palette"></i> Color del Card PNG</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <p class="small text-muted mb-3">El color se aplicará al encabezado y pie del Flyer (El fondo se mantendrá blanco).</p>
+                <div class="d-flex justify-content-center flex-wrap gap-2" id="colorContainer">
+                    <div class="color-swatch active" style="background-color: #ffc107;" onclick="seleccionarColor('#ffc107')" title="Amarillo Warning (Por defecto)"></div>
+                    <div class="color-swatch" style="background-color: #ffadad;" onclick="seleccionarColor('#ffadad')" title="Rojo Pastel"></div>
+                    <div class="color-swatch" style="background-color: #ffd6a5;" onclick="seleccionarColor('#ffd6a5')" title="Naranja Pastel"></div>
+                    <div class="color-swatch" style="background-color: #a0c4ff;" onclick="seleccionarColor('#a0c4ff')" title="Azul Pastel"></div>
+                    <div class="color-swatch" style="background-color: #fdffb6;" onclick="seleccionarColor('#fdffb6')" title="Amarillo Pastel"></div>
+                    <div class="color-swatch" style="background-color: #bdb2ff;" onclick="seleccionarColor('#bdb2ff')" title="Púrpura Pastel"></div>
+                    <div class="color-swatch" style="background-color: #e5e5e5;" onclick="seleccionarColor('#e5e5e5')" title="Gris Claro"></div>
+                    <div class="color-swatch" style="background-color: #4a4e69;" onclick="seleccionarColor('#4a4e69')" title="Negro Grisáceo"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Detalles (Que también sirve de Preview Card antes de exportar) -->
+<div class="modal fade" id="modalDetalles" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 500px;">
+        <div class="modal-content border-0 bg-transparent shadow-none">
+            <!-- Close Button Outside Card -->
+            <div class="text-end mb-2">
+                <button type="button" class="btn-close bg-white rounded-circle p-2 shadow" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <!-- EL CARD EN SÍ MISMO (Se exportará este contenedor exacto) -->
+            <div id="exportCardContainer" style="background-color: #fcfcfc; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                
+                <!-- HEADER DEL CARD (Color Dinámico) -->
+                <div id="cardHeader" class="card-export-header">
+                    <h3 id="cardRenderNombre" class="m-0 fw-bold" style="font-size: 1.6rem;"></h3>
+                </div>
+                
+                <!-- FLYER -->
+                <img id="cardRenderFlyer" class="card-export-flyer" src="" style="display:none;">
+                
+                <!-- BODY DEL CARD (Fondo Estático Claro) -->
+                <div class="card-export-body" style="color: #2c3e50;">
+                    <div style="text-align: center; margin-bottom: 5px;">
+                        <span class="info-pill"><i class="fa-solid fa-mountain-sun text-warning-custom"></i> <span id="cardRenderTipo"></span></span>
+                        <span class="info-pill"><i class="fa-regular fa-clock text-primary"></i> <span id="cardRenderDias"></span> Día(s)</span>
+                    </div>
+                    
+                    <!-- PRECIO GIGANTE Y RESERVA -->
+                    <div id="cardRenderPrecio" style="font-size: 3.2rem; font-weight: 900; text-align:center; margin-bottom: 5px; line-height: 1;"></div>
+                    <div id="cardRenderReservaContainer" style="display:none; font-size: 0.95em; opacity: 0.9; margin-bottom: 10px; text-align: center;">
+                        <strong>Monto de Reserva:</strong> <span id="cardRenderReserva" style="color: #198754; font-weight: bold;"></span>
+                    </div>
+                    
+                    <hr style="border-color: rgba(0,0,0,0.1);">
+                    
+                    <h5 class="fw-bold text-warning-custom"><i class="fa-solid fa-location-arrow"></i> Logística</h5>
+                    <div id="cardRenderLogistica" style="font-size: 0.95em; opacity: 0.9; margin-bottom: 15px;"></div>
+                    
+                    <div id="cardRenderIncluyeContainer">
+                        <h5 class="fw-bold text-success"><i class="fa-solid fa-check-double"></i> Incluye</h5>
+                        <div id="cardRenderIncluye" style="margin-bottom: 15px;"></div>
+                    </div>
+
+                    <div id="cardRenderAcompananteContainer" style="display:none; font-size: 0.9em; opacity: 0.85; margin-bottom: 15px; border-left: 3px solid #ffc107; padding-left: 10px; background: rgba(255,193,7,0.1); padding: 8px; border-radius: 4px;">
+                        <strong>Acompañantes:</strong> <span id="cardRenderAcompanante"></span>
+                    </div>
+
+                    <div id="cardRenderDetallesContainer">
+                        <h5 class="fw-bold text-warning-custom"><i class="fa-solid fa-circle-info"></i> Detalles</h5>
+                        <p id="cardRenderDetalles" style="font-size: 0.9em; opacity: 0.85; white-space: pre-wrap; margin-bottom: 15px;"></p>
+                    </div>
+                    
+                    <h5 class="fw-bold text-warning-custom"><i class="fa-solid fa-wallet"></i> Pagos</h5>
+                    <div id="cardRenderPagos" style="font-size: 0.9em; opacity: 0.9;"></div>
+                    
+                    <!-- Mensaje de Seguridad -->
+                    <p style="font-size:0.75rem; text-align:center; color:#dc3545; margin-top:20px; margin-bottom: 0; font-weight:bold; background: rgba(255,255,255,0.7); border-radius: 5px; padding: 5px;">
+                        <i class="fa-solid fa-shield-halved"></i> No revele la hora ni lugar de Salida por su seguridad
+                    </p>
+                    
+                    <!-- Año Actual Centrado -->
+                    <div id="cardRenderYear" style="text-align:center; font-weight:900; margin-top:5px; opacity: 0.4; font-size: 1.2rem;"></div>
+                </div>
+                
+                <!-- FOOTER DEL CARD (Color Dinámico) -->
+                <div id="cardFooter" class="card-export-footer">
+                    HECHO CON ❤️ POR LA TRIBU DE LOS LIBRES
+                </div>
+            </div>
+
+            <!-- Botones de Acción (Debajo del Card) -->
+            <div class="mt-3 d-flex flex-column gap-2 bg-white p-3 rounded-4 shadow">
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-success flex-fill fw-bold" id="btnCompartirWhatsApp">
+                        <i class="fa-brands fa-whatsapp"></i> WhatsApp
+                    </button>
+                    <button type="button" class="btn btn-primary flex-fill fw-bold" id="btnExportarCard">
+                        <i class="fa-solid fa-image"></i> Exportar PNG
+                    </button>
+                </div>
+                <hr class="m-0 border-secondary opacity-25">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="small text-muted fw-bold ms-1">Administrar:</span>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" id="btnEditarModal"><i class="fa-solid fa-pen"></i> Editar</button>
+                        <button class="btn btn-sm btn-outline-danger" id="btnBorrarModal"><i class="fa-solid fa-trash"></i> Borrar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Eliminar -->
+<div class="modal fade" id="modalEliminar" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-danger">
+            <div class="modal-body text-center py-4">
+                <i class="fa-solid fa-triangle-exclamation fa-3x text-danger mb-3"></i>
+                <h5 class="text-dark fw-bold" id="deleteMsg">¿Borrar esta actividad?</h5>
+                <p class="small text-muted" id="deleteSubMsg">Paso 1 de 3</p>
+                <div class="mt-4 d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-light border btn-sm" data-bs-dismiss="modal" onclick="resetDeleteModal()">Cancelar</button>
+                    <button type="button" class="btn btn-danger btn-sm fw-bold" id="btnDeleteConfirm" onclick="procesarEliminacion()">Sí, Borrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Exportar General -->
+<div class="modal fade" id="modalExportar" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-warning-custom fw-bold"><i class="fa-solid fa-share-nodes"></i> Exportar Lista</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label text-warning-custom fw-bold">Filtrar por:</label>
+                    <select class="form-select" id="exportTipoFiltro" onchange="actualizarOpcionesExportacion()">
+                        <option value="mes">Mes Específico</option>
+                        <option value="trimestre">Trimestre</option>
+                        <option value="semestre">Semestre</option>
+                        <option value="anio">Año Completo</option>
+                    </select>
+                </div>
+                
+                <div class="mb-4" id="divExportOpciones">
+                    <select class="form-select" id="exportValorSeleccionado"></select>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success" onclick="ejecutarExportacion('txt')">
+                        <i class="fa-brands fa-whatsapp"></i> Generar TXT Formateado
+                    </button>
+                    <button class="btn btn-primary" onclick="ejecutarExportacion('png')">
+                        <i class="fa-solid fa-image"></i> Descargar Imagen PNG
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CONTENEDORES OCULTOS PARA RENDERIZADO PNG GENERAL -->
+<div id="exportContainer">
+    <div style="background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+        <h2 class="text-warning-custom text-center mb-4 fw-bold">CALENDARIO - LA TRIBU DE LOS LIBRES</h2>
+        <div id="exportContent"></div>
+    </div>
+    <div class="text-center mt-4 fw-bold text-muted" style="border-top: 2px dashed #ccc; padding-top: 15px;">
+        HECHO CON ❤️ POR LA TRIBU DE LOS LIBRES
+    </div>
+</div>
+
+<!-- CONTENEDOR OFF-SCREEN PARA RENDERIZADO VISTA ACTUAL PNG -->
+<div id="exportVistaContainer" style="position: absolute; left: -9999px; top: 0; width: 800px; background-color: var(--bg-light); padding: 30px; color: var(--text-dark);">
+    <div style="background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+        <h2 id="exportVistaTitle" class="text-warning-custom text-center mb-4 fw-bold"></h2>
+        <div id="exportVistaContent" class="lista-contenedor"></div>
+    </div>
+    <div class="text-center mt-4 fw-bold text-muted" style="border-top: 2px dashed #ccc; padding-top: 15px;">
+        HECHO CON ❤️ POR LA TRIBU DE LOS LIBRES
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Lógica Principal -->
+<script>
+    // --- VARIABLES GLOBALES Y CONSTANTES ---
+    const ANIO_INICIO = 2026;
+    const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+    let actividades = []; 
+    let estadoGlobalColapsado = false; 
+    
+    // Configuración Accesibilidad y Colores
+    let currentFontSize = 100;
+    let selectedCardBg = '#ffc107'; // Amarillo por defecto
+    let selectedCardText = '#000000'; // Texto negro para contraste
+    
+    // Eliminación
+    let deletePaso = 1;
+    let deleteActId = null;
+
+    // Modales de Bootstrap
+    let bsModalActividad, bsModalEliminar, bsModalExportar, bsModalDetalles, bsModalColor;
+
+    // --- FUNCIONES DE FORMATEO ---
+    function toTitleCase(str) {
+        return str.toLowerCase().replace(/(?:^|\s|-)\S/g, function(match) {
+            return match.toUpperCase();
+        });
+    }
+
+    // --- INICIALIZACIÓN DE LA BASE DE DATOS (IndexedDB) ---
+    const DB_NAME = "TribuCalendarioDB";
+    const DB_VERSION = 5; 
+    const STORE_NAME = "actividades";
+    let db;
+
+    function initDB() {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME, { keyPath: "id" });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            cargarActividades();
+        };
+
+        request.onerror = (event) => { console.error("Error al abrir IndexedDB", event); };
+    }
+
+    function cargarActividades() {
+        const transaction = db.transaction([STORE_NAME], "readonly");
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.getAll();
+
+        request.onsuccess = () => {
+            actividades = request.result || [];
+            ejecutarFiltroBusqueda(); 
+        };
+    }
+
+    function guardarEnDB(actividad, callback) {
+        const transaction = db.transaction([STORE_NAME], "readwrite");
+        const store = transaction.objectStore(STORE_NAME);
+        store.put(actividad).onsuccess = () => { cargarActividades(); if(callback) callback(); };
+    }
+
+    function eliminarDeDB(id, callback) {
+        const transaction = db.transaction([STORE_NAME], "readwrite");
+        const store = transaction.objectStore(STORE_NAME);
+        store.delete(id).onsuccess = () => { cargarActividades(); if(callback) callback(); };
+    }
+
+    function reemplazarDBCompleta(nuevasActividades) {
+        const transaction = db.transaction([STORE_NAME], "readwrite");
+        const store = transaction.objectStore(STORE_NAME);
+        store.clear().onsuccess = () => {
+            nuevasActividades.forEach(act => store.add(act));
+            cargarActividades();
+            alert("Base de datos restaurada correctamente.");
+        };
+    }
+
+    // --- INICIALIZACIÓN DE LA UI ---
+    document.addEventListener('DOMContentLoaded', () => {
+        bsModalActividad = new bootstrap.Modal(document.getElementById('modalActividad'));
+        bsModalEliminar = new bootstrap.Modal(document.getElementById('modalEliminar'));
+        bsModalExportar = new bootstrap.Modal(document.getElementById('modalExportar'));
+        bsModalDetalles = new bootstrap.Modal(document.getElementById('modalDetalles'));
+        bsModalColor = new bootstrap.Modal(document.getElementById('modalColorCard'));
+
+        poblarSelectsFechas('salida');
+        poblarSelectsFechas('regreso');
+        initDB();
+
+        // Conversor de imagen
+        document.getElementById('actFlyer').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) { document.getElementById('actFlyerBase64').value = e.target.result; };
+                reader.readAsDataURL(file);
+            } else document.getElementById('actFlyerBase64').value = "";
+        });
+    });
+
+    // --- ACCESIBILIDAD ---
+    function cambiarTamanoFuente(delta) {
+        currentFontSize += delta;
+        if(currentFontSize < 70) currentFontSize = 70;
+        if(currentFontSize > 150) currentFontSize = 150;
+        document.body.style.fontSize = currentFontSize + '%';
+    }
+
+    // --- LÓGICA DE FORMULARIO ---
+    function poblarSelectsFechas(prefijo) {
+        const selDia = document.getElementById(`${prefijo}Dia`);
+        const selMes = document.getElementById(`${prefijo}Mes`);
+        const selAnio = document.getElementById(`${prefijo}Anio`);
+
+        for(let i=1; i<=31; i++) {
+            let val = i.toString().padStart(2, '0');
+            selDia.innerHTML += `<option value="${val}">${val}</option>`;
+        }
+        MESES.forEach((mes, idx) => {
+            let val = (idx + 1).toString().padStart(2, '0');
+            selMes.innerHTML += `<option value="${val}">${mes}</option>`;
+        });
+        for(let i = ANIO_INICIO; i <= ANIO_INICIO + 10; i++) {
+            selAnio.innerHTML += `<option value="${i}">${i}</option>`;
+        }
+    }
+
+    function toggleCampos() {
+        const tipo = document.getElementById('actTipo').value;
+        const dias = parseInt(document.getElementById('actDias').value) || 1;
+
+        if (tipo === 'Internacional') document.getElementById('divDestinoInt').classList.remove('d-none'); 
+        else document.getElementById('divDestinoInt').classList.add('d-none'); 
+
+        if (dias > 1) {
+            document.getElementById('divLugarSalida').classList.add('d-none');
+            document.getElementById('divRegreso').classList.remove('d-none');
+        } else {
+            document.getElementById('divLugarSalida').classList.remove('d-none');
+            document.getElementById('divRegreso').classList.add('d-none');
+        }
+    }
+    
+    function toggleOtherDesc() {
+        const isChecked = document.getElementById('checkOtros').checked;
+        const container = document.getElementById('otrosDescContainer');
+        if(isChecked) container.classList.remove('d-none');
+        else {
+            container.classList.add('d-none');
+            document.getElementById('otrosDescripcion').value = '';
+        }
+    }
+
+    function toggleAcompanante() {
+        const val = document.getElementById('actAcompanante').value;
+        if (val === 'Sí') {
+            document.getElementById('divAcompananteDesc').classList.remove('d-none');
+        } else {
+            document.getElementById('divAcompananteDesc').classList.add('d-none');
+            document.getElementById('actAcompananteDesc').value = '';
+        }
+    }
+
+    function abrirModalAgregar() {
+        document.getElementById('formActividad').reset();
+        document.getElementById('actId').value = '';
+        document.getElementById('actFlyerBase64').value = '';
+        document.getElementById('modalActividadTitle').innerHTML = '<i class="fa-solid fa-pen"></i> Nueva Actividad';
+        
+        document.querySelectorAll('input[name="incluye"]').forEach(cb => cb.checked = false);
+        toggleOtherDesc();
+        toggleAcompanante();
+        
+        const hoy = new Date();
+        const yyyy = Math.max(hoy.getFullYear(), ANIO_INICIO);
+        let mm = String(hoy.getMonth() + 1).padStart(2, '0');
+        let dd = String(hoy.getDate()).padStart(2, '0');
+
+        document.getElementById('salidaAnio').value = yyyy;
+        document.getElementById('salidaMes').value = mm;
+        document.getElementById('salidaDia').value = dd;
+        
+        toggleCampos();
+        bsModalActividad.show();
+    }
+
+    function editarActividad(id) {
+        const act = actividades.find(a => a.id === id);
+        if(!act) return;
+
+        bsModalDetalles.hide();
+
+        document.getElementById('actId').value = act.id;
+        document.getElementById('actNombre').value = act.nombre;
+        document.getElementById('actDetalles').value = act.detalles || '';
+        document.getElementById('actFlyerBase64').value = act.flyer || '';
+        document.getElementById('actFlyer').value = ''; 
+        
+        document.getElementById('actTipo').value = act.tipo;
+        if(act.tipo === 'Internacional') document.getElementById('actDestinoInt').value = act.destinoInt;
+        document.getElementById('actMoneda').value = act.moneda;
+        document.getElementById('actPrecio').value = act.precio;
+        document.getElementById('actReserva').value = act.reserva || '';
+        document.getElementById('actCapacidad').value = act.capacidad;
+        document.getElementById('actDias').value = act.dias;
+        document.getElementById('actAcompanante').value = act.acompanante || 'No';
+        document.getElementById('actAcompananteDesc').value = act.acompananteDesc || '';
+        toggleAcompanante();
+        
+        document.querySelectorAll('input[name="incluye"]').forEach(cb => cb.checked = false);
+        if(act.incluye && Array.isArray(act.incluye)) {
+            act.incluye.forEach(val => {
+                const cb = document.querySelector(`input[name="incluye"][value="${val}"]`);
+                if(cb) cb.checked = true;
+            });
+        }
+        document.getElementById('otrosDescripcion').value = act.otrosDesc || '';
+        toggleOtherDesc();
+        
+        if(act.sinpe) document.getElementById('actSinpe').value = act.sinpe;
+        if(act.cuenta) document.getElementById('actCuenta').value = act.cuenta;
+
+        const [sYear, sMonth, sDay] = act.fechaSalida.split('-');
+        document.getElementById('salidaAnio').value = sYear;
+        document.getElementById('salidaMes').value = sMonth;
+        document.getElementById('salidaDia').value = sDay;
+        document.getElementById('salidaHora').value = act.horaSalida;
+
+        if (act.dias == 1) document.getElementById('salidaLugar').value = act.lugarSalida;
+        else {
+            const [rYear, rMonth, rDay] = act.fechaRegreso.split('-');
+            document.getElementById('regresoAnio').value = rYear;
+            document.getElementById('regresoMes').value = rMonth;
+            document.getElementById('regresoDia').value = rDay;
+            document.getElementById('regresoHora').value = act.horaRegreso;
+        }
+
+        document.getElementById('modalActividadTitle').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Editar Actividad';
+        toggleCampos();
+        bsModalActividad.show();
+    }
+
+    function guardarActividad() {
+        if(!document.getElementById('formActividad').checkValidity()) {
+            document.getElementById('formActividad').reportValidity();
+            return;
+        }
+
+        const id = document.getElementById('actId').value || Date.now().toString();
+        const dias = parseInt(document.getElementById('actDias').value);
+        const fechaSalida = `${document.getElementById('salidaAnio').value}-${document.getElementById('salidaMes').value}-${document.getElementById('salidaDia').value}`;
+
+        let arrayIncluye = [];
+        document.querySelectorAll('input[name="incluye"]:checked').forEach(cb => {
+            arrayIncluye.push(cb.value);
+        });
+
+        let nombreActividad = toTitleCase(document.getElementById('actNombre').value);
+
+        let actividad = {
+            id: id,
+            nombre: nombreActividad,
+            detalles: document.getElementById('actDetalles').value,
+            flyer: document.getElementById('actFlyerBase64').value,
+            tipo: document.getElementById('actTipo').value,
+            destinoInt: document.getElementById('actTipo').value === 'Internacional' ? document.getElementById('actDestinoInt').value : null,
+            moneda: document.getElementById('actMoneda').value,
+            precio: document.getElementById('actPrecio').value,
+            reserva: document.getElementById('actReserva').value,
+            capacidad: document.getElementById('actCapacidad').value,
+            dias: dias,
+            acompanante: document.getElementById('actAcompanante').value,
+            acompananteDesc: document.getElementById('actAcompanante').value === 'Sí' ? document.getElementById('actAcompananteDesc').value : '',
+            fechaSalida: fechaSalida,
+            horaSalida: document.getElementById('salidaHora').value,
+            sinpe: document.getElementById('actSinpe').value,
+            cuenta: document.getElementById('actCuenta').value,
+            incluye: arrayIncluye,
+            otrosDesc: document.getElementById('checkOtros').checked ? document.getElementById('otrosDescripcion').value : ''
+        };
+
+        if (dias == 1) actividad.lugarSalida = document.getElementById('salidaLugar').value;
+        else {
+            actividad.fechaRegreso = `${document.getElementById('regresoAnio').value}-${document.getElementById('regresoMes').value}-${document.getElementById('regresoDia').value}`;
+            actividad.horaRegreso = document.getElementById('regresoHora').value;
+        }
+
+        guardarEnDB(actividad, () => { bsModalActividad.hide(); });
+    }
+
+    // --- LÓGICA DE ELIMINACIÓN ---
+    function iniciarEliminacion(id) {
+        bsModalDetalles.hide();
+        deleteActId = id;
+        deletePaso = 1;
+        actualizarModalEliminar();
+        bsModalEliminar.show();
+    }
+
+    function resetDeleteModal() { deletePaso = 1; deleteActId = null; }
+
+    function actualizarModalEliminar() {
+        const msg = document.getElementById('deleteMsg');
+        const subMsg = document.getElementById('deleteSubMsg');
+        const btn = document.getElementById('btnDeleteConfirm');
+
+        if(deletePaso === 1) {
+            msg.innerText = "¿Realmente deseas borrar esta actividad?"; subMsg.innerText = "Paso 1 de 3";
+            btn.innerText = "Sí, Continuar"; btn.className = "btn btn-danger btn-sm fw-bold";
+        } else if (deletePaso === 2) {
+            msg.innerText = "¡Atención! Esta acción es irreversible."; subMsg.innerText = "Paso 2 de 3";
+            btn.innerText = "Estoy Seguro"; btn.className = "btn btn-warning btn-sm fw-bold"; 
+        } else if (deletePaso === 3) {
+            msg.innerText = "Última confirmación. ¿Borrar definitivamente?"; subMsg.innerText = "Paso 3 de 3 (Final)";
+            btn.innerText = "ELIMINAR DEFINITIVAMENTE"; btn.className = "btn btn-danger btn-sm fw-bold text-uppercase";
+        }
+    }
+
+    function procesarEliminacion() {
+        if (deletePaso < 3) { deletePaso++; actualizarModalEliminar(); } 
+        else { eliminarDeDB(deleteActId, () => { bsModalEliminar.hide(); resetDeleteModal(); }); }
+    }
+
+    // --- RENDERIZADO DE LA LISTA NATURAL ---
+    function formatearFechaVista(fechaString) {
+        const [y, m, d] = fechaString.split('-');
+        return `${d} ${MESES[parseInt(m)-1].substring(0,3)} ${y}`;
+    }
+
+    function toggleColapsarTodo() {
+        estadoGlobalColapsado = !estadoGlobalColapsado;
+        const texto = document.getElementById('textoColapsar');
+        texto.innerText = estadoGlobalColapsado ? 'Expandir Todo' : 'Colapsar Todo';
+        ejecutarFiltroBusqueda(); 
+    }
+
+    function ejecutarFiltroBusqueda() {
+        const filtro = document.getElementById('buscadorInput').value.toLowerCase();
+        
+        let actsFiltradas = actividades;
+        if (filtro) {
+            actsFiltradas = actividades.filter(act => {
+                const mesAnioStr = formatearFechaVista(act.fechaSalida).toLowerCase();
+                const strGeneral = `${act.nombre} ${act.tipo} ${act.precio} ${mesAnioStr}`.toLowerCase();
+                return strGeneral.includes(filtro);
+            });
+        }
+        renderizarLista(actsFiltradas);
+    }
+
+    function renderizarLista(actsParaRenderizar = actividades) {
+        const contenedor = document.getElementById('contenedorItems');
+        const emptyState = document.getElementById('emptyState');
+        const emptyMsg = document.getElementById('emptyMsg');
+        
+        contenedor.innerHTML = '';
+
+        if (actsParaRenderizar.length === 0) {
+            emptyState.classList.remove('d-none');
+            emptyMsg.innerText = actividades.length === 0 
+                ? "No hay actividades programadas. ¡Agrega una nueva aventura!" 
+                : "No hay resultados para tu búsqueda.";
+            return;
+        } else emptyState.classList.add('d-none');
+
+        const ordenadas = [...actsParaRenderizar].sort((a, b) => a.fechaSalida.localeCompare(b.fechaSalida));
+        const agrupadas = ordenadas.reduce((acc, act) => {
+            const mesAnio = act.fechaSalida.substring(0, 7);
+            if(!acc[mesAnio]) acc[mesAnio] = [];
+            acc[mesAnio].push(act);
+            return acc;
+        }, {});
+
+        for (const [key, acts] of Object.entries(agrupadas)) {
+            const [y, m] = key.split('-');
+            const nombreMes = `${MESES[parseInt(m)-1]} ${y}`;
+            const collapseId = `collapseMes-${key}`;
+
+            const sep = document.createElement('div');
+            sep.className = 'mes-separador d-flex justify-content-between align-items-center';
+            sep.setAttribute('data-bs-toggle', 'collapse');
+            sep.setAttribute('href', `#${collapseId}`);
+            sep.setAttribute('role', 'button');
+            sep.setAttribute('aria-expanded', estadoGlobalColapsado ? 'false' : 'true');
+            sep.setAttribute('aria-controls', collapseId);
+            
+            sep.innerHTML = `<span><i class="fa-regular fa-calendar"></i> ${nombreMes}</span><i class="fa-solid fa-chevron-down text-muted"></i>`;
+            contenedor.appendChild(sep);
+
+            const collapseDiv = document.createElement('div');
+            collapseDiv.id = collapseId;
+            collapseDiv.className = estadoGlobalColapsado ? 'collapse' : 'collapse show';
+            contenedor.appendChild(collapseDiv);
+
+            acts.forEach(act => {
+                const esSuspendida = act.tipo === 'Suspendida';
+                
+                let tituloTipo = act.tipo;
+                if(act.tipo === 'Internacional') tituloTipo += ` (${act.destinoInt})`;
+                if(esSuspendida) tituloTipo = `<span class="text-danger fw-bold"><i class="fa-solid fa-ban"></i> SUSPENDIDA</span>`;
+
+                const divItem = document.createElement('div');
+                divItem.className = 'item-actividad';
+                divItem.onclick = () => verDetalles(act.id);
+                
+                divItem.innerHTML = `
+                    <div class="item-linea-principal">
+                        <div class="item-linea-izq">
+                            <span class="act-nombre" style="${esSuspendida ? 'text-decoration: line-through; color: #dc3545;' : ''}">${act.nombre}</span>
+                            <span class="act-tipo">(${tituloTipo})</span>
+                        </div>
+                        <div class="item-linea-der">
+                            <span class="act-precio" style="${esSuspendida ? 'color: #dc3545;' : ''}">${act.moneda}${act.precio}</span>
+                        </div>
+                    </div>
+                    <div class="act-sublinea">
+                        <div style="text-align: left;"><i class="fa-solid fa-users text-warning-custom"></i> Cap: ${act.capacidad}</div>
+                        <div style="text-align: center;"><i class="fa-regular fa-clock text-warning-custom"></i> Hora: ${act.horaSalida}</div>
+                        <div style="text-align: right;" class="act-fecha">${formatearFechaVista(act.fechaSalida)}</div>
+                    </div>
+                `;
+                collapseDiv.appendChild(divItem);
+            });
+        }
+    }
+
+    // --- COLOR Y CONTRASTE DE CARD ---
+    function abrirModalColorCard() {
+        bsModalColor.show();
+    }
+
+    function calcularContraste(hexcolor) {
+        hexcolor = hexcolor.replace("#", "");
+        if (hexcolor.length === 3) hexcolor = hexcolor.split('').map(c => c+c).join('');
+        const r = parseInt(hexcolor.substr(0,2),16);
+        const g = parseInt(hexcolor.substr(2,2),16);
+        const b = parseInt(hexcolor.substr(4,2),16);
+        const yiq = ((r*299)+(g*587)+(b*114))/1000;
+        return (yiq >= 128) ? '#2c3e50' : '#ffffff';
+    }
+
+    function seleccionarColor(colorHex) {
+        document.querySelectorAll('.color-swatch').forEach(sw => sw.classList.remove('active'));
+        event.target.classList.add('active');
+        
+        selectedCardBg = colorHex;
+        selectedCardText = calcularContraste(colorHex);
+        
+        // Aplicar color en tiempo real si el modal está abierto
+        if(document.getElementById('modalDetalles').classList.contains('show')) {
+            document.getElementById('cardHeader').style.backgroundColor = selectedCardBg;
+            document.getElementById('cardHeader').style.color = selectedCardText;
+            document.getElementById('cardFooter').style.backgroundColor = selectedCardBg;
+            document.getElementById('cardFooter').style.color = selectedCardText;
+            
+            // Si no está suspendida, mantener el color del nombre según el contraste
+            if(document.getElementById('cardRenderNombre').style.textDecoration !== 'line-through') {
+                document.getElementById('cardRenderNombre').style.color = selectedCardText;
+            }
+        }
+        
+        setTimeout(() => { bsModalColor.hide(); }, 200);
+    }
+
+    // --- CARGAR DATOS EN EL CARD MODAL ---
+    function verDetalles(id) {
+        const act = actividades.find(a => a.id === id);
+        if(!act) return;
+
+        const esSuspendida = act.tipo === 'Suspendida';
+
+        // Aplicar Color Personalizado a Header y Footer del Card
+        document.getElementById('cardHeader').style.backgroundColor = selectedCardBg;
+        document.getElementById('cardHeader').style.color = selectedCardText;
+        document.getElementById('cardFooter').style.backgroundColor = selectedCardBg;
+        document.getElementById('cardFooter').style.color = selectedCardText;
+
+        document.getElementById('cardRenderNombre').innerText = act.nombre;
+        document.getElementById('cardRenderNombre').style.color = esSuspendida ? '#dc3545' : selectedCardText;
+        document.getElementById('cardRenderNombre').style.textDecoration = esSuspendida ? 'line-through' : 'none';
+
+        let renderTipo = act.tipo === 'Internacional' ? `${act.tipo} (${act.destinoInt})` : act.tipo;
+        if(esSuspendida) renderTipo = `<span class="text-danger fw-bold"><i class="fa-solid fa-ban"></i> SUSPENDIDA</span>`;
+        document.getElementById('cardRenderTipo').innerHTML = renderTipo;
+        
+        const colorPrecio = esSuspendida ? '#dc3545' : '#198754';
+        document.getElementById('cardRenderPrecio').innerText = `${act.moneda}${act.precio}`;
+        document.getElementById('cardRenderPrecio').style.color = colorPrecio;
+        
+        // Reserva
+        if (act.reserva && act.reserva > 0) {
+            document.getElementById('cardRenderReservaContainer').style.display = 'block';
+            document.getElementById('cardRenderReserva').innerText = `${act.moneda}${act.reserva}`;
+        } else {
+            document.getElementById('cardRenderReservaContainer').style.display = 'none';
+        }
+        
+        document.getElementById('cardRenderDias').innerText = act.dias;
+
+        const flyerEl = document.getElementById('cardRenderFlyer');
+        if(act.flyer) { flyerEl.src = act.flyer; flyerEl.style.display = 'block'; } 
+        else flyerEl.style.display = 'none';
+
+        let logisticaStr = `<strong>Salida:</strong> ${formatearFechaVista(act.fechaSalida)} - ${act.horaSalida}<br>`;
+        if(act.dias == 1) logisticaStr += `<strong>Lugar:</strong> ${act.lugarSalida}`;
+        else logisticaStr += `<strong>Regreso:</strong> ${formatearFechaVista(act.fechaRegreso)} - ${act.horaRegreso}`;
+        document.getElementById('cardRenderLogistica').innerHTML = logisticaStr;
+
+        // Incluye
+        if (act.incluye && act.incluye.length > 0) {
+            document.getElementById('cardRenderIncluyeContainer').style.display = 'block';
+            let incHTML = '';
+            act.incluye.forEach(inc => {
+                let texto = inc === 'Otros' ? (act.otrosDesc || 'Otros') : inc;
+                incHTML += `<span class="incluye-pill"><i class="fa-solid fa-check text-success"></i> ${texto}</span>`;
+            });
+            document.getElementById('cardRenderIncluye').innerHTML = incHTML;
+        } else {
+            document.getElementById('cardRenderIncluyeContainer').style.display = 'none';
+        }
+
+        // Acompañantes
+        if (act.acompanante === 'Sí') {
+            document.getElementById('cardRenderAcompananteContainer').style.display = 'block';
+            document.getElementById('cardRenderAcompanante').innerText = act.acompananteDesc || 'Permitido';
+        } else {
+            document.getElementById('cardRenderAcompananteContainer').style.display = 'none';
+        }
+
+        if (act.detalles) {
+            document.getElementById('cardRenderDetallesContainer').style.display = 'block';
+            document.getElementById('cardRenderDetalles').innerText = act.detalles;
+        } else document.getElementById('cardRenderDetallesContainer').style.display = 'none';
+
+        // Pagos PNG
+        let pagosStr = `<strong>SINPE:</strong> ${act.sinpe || 'No definido'}<br>`;
+        if(act.cuenta && act.cuenta !== 'Ninguna') pagosStr += `<strong>Cuenta:</strong> ${act.cuenta}`;
+        document.getElementById('cardRenderPagos').innerHTML = pagosStr;
+        
+        // Año actual dinámico
+        document.getElementById('cardRenderYear').innerText = new Date().getFullYear();
+
+        // Asignar funciones a los botones del Modal
+        document.getElementById('btnExportarCard').onclick = () => exportarCardPNG(act);
+        document.getElementById('btnCompartirWhatsApp').onclick = () => compartirWhatsApp(act);
+        document.getElementById('btnEditarModal').onclick = () => editarActividad(act.id);
+        document.getElementById('btnBorrarModal').onclick = () => iniciarEliminacion(act.id);
+
+        bsModalDetalles.show();
+    }
+
+    // --- COMPARTIR WHATSAPP ---
+    function compartirWhatsApp(act) {
+        const esSuspendida = act.tipo === 'Suspendida';
+        
+        let txt = `⛰️ *${act.nombre}*\n`;
+        if (esSuspendida) txt += `🚫 *ESTADO: SUSPENDIDA*\n`;
+        else txt += `🥾 Tipo: ${act.tipo === 'Internacional' ? `${act.tipo} (${act.destinoInt})` : act.tipo}\n`;
+        
+        txt += `🚀 *Salida:* ${formatearFechaVista(act.fechaSalida)} a las ${act.horaSalida}\n`;
+        if (act.dias == 1) txt += `📍 *Lugar:* ${act.lugarSalida}\n`;
+        else txt += `🔙 *Regreso:* ${formatearFechaVista(act.fechaRegreso)} a las ${act.horaRegreso}\n`;
+        
+        txt += `💰 *Precio:* ${act.moneda}${act.precio}\n`;
+        if(act.reserva && act.reserva > 0) txt += `💵 *Reserva:* ${act.moneda}${act.reserva}\n`;
+        
+        txt += `👥 *Capacidad:* ${act.capacidad}\n`;
+        if(act.acompanante === 'Sí') txt += `🤝 *Acompañantes:* ${act.acompananteDesc || 'Permitido'}\n`;
+        txt += `\n`;
+        
+        if (act.incluye && act.incluye.length > 0) {
+            txt += `✅ *INCLUYE:*\n`;
+            act.incluye.forEach(inc => {
+                txt += `- ${inc === 'Otros' ? (act.otrosDesc || 'Otros') : inc}\n`;
+            });
+            txt += `\n`;
+        }
+        
+        if(act.detalles) txt += `📝 *Detalles:* ${act.detalles}\n\n`;
+
+        txt += `💳 *MÉTODOS DE PAGO*\n`;
+        txt += `📱 SINPE: ${act.sinpe || 'Pendiente'}\n`;
+        if(act.cuenta && act.cuenta !== 'Ninguna') txt += `🏦 Cuenta: ${act.cuenta}\n`;
+        
+        txt += `\nHECHO CON ❤️ POR LA TRIBU DE LOS LIBRES`;
+
+        const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(txt)}`;
+        window.open(url, '_blank');
+    }
+
+    // --- EXPORTAR CARD A PNG ---
+    function exportarCardPNG(act) {
+        document.body.style.cursor = 'wait';
+        const btn = document.getElementById('btnExportarCard');
+        const originalBtnHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generando...';
+        btn.disabled = true;
+
+        const exportNode = document.getElementById('exportCardContainer');
+
+        // Aplicamos transparent o color de fondo general para evitar esquinas blancas en el PNG
+        setTimeout(() => {
+            html2canvas(exportNode, { backgroundColor: 'transparent', scale: 2, useCORS: true }).then(canvas => {
+                document.body.style.cursor = 'default';
+                btn.innerHTML = originalBtnHTML; 
+                btn.disabled = false;
+                const a = document.createElement('a');
+                a.href = canvas.toDataURL("image/png");
+                a.download = `Flyer_${act.nombre.replace(/ /g, "_")}.png`;
+                a.click();
+            });
+        }, 300);
+    }
+
+    // --- EXPORTACIÓN VISTA ACTUAL A PNG ---
+    function exportarVistaPNG() {
+        document.body.style.cursor = 'wait';
+        const anioActual = new Date().getFullYear();
+        document.getElementById('exportVistaTitle').innerText = `Calendario ${anioActual} De La Tribu de Los Libres`;
+        
+        const contenedorOriginal = document.getElementById('contenedorItems');
+        const contenedorClon = contenedorOriginal.cloneNode(true);
+        
+        const contentDest = document.getElementById('exportVistaContent');
+        contentDest.innerHTML = '';
+        contentDest.appendChild(contenedorClon);
+
+        const exportNode = document.getElementById('exportVistaContainer');
+        exportNode.style.left = '0'; 
+        exportNode.style.zIndex = '-1';
+
+        setTimeout(() => {
+            html2canvas(exportNode, { backgroundColor: '#f4f7f6', scale: 2 }).then(canvas => {
+                exportNode.style.left = '-9999px'; 
+                document.body.style.cursor = 'default';
+                const a = document.createElement('a'); 
+                a.href = canvas.toDataURL("image/png");
+                a.download = `Calendario_Vista_${anioActual}.png`; 
+                a.click();
+            });
+        }, 300);
+    }
+
+    // --- EXPORTACIÓN GENERAL LISTA ---
+    function abrirModalExportar() { actualizarOpcionesExportacion(); bsModalExportar.show(); }
+
+    function actualizarOpcionesExportacion() {
+        const tipo = document.getElementById('exportTipoFiltro').value;
+        const selectValor = document.getElementById('exportValorSeleccionado');
+        selectValor.innerHTML = '';
+
+        const aniosSet = new Set(actividades.map(a => a.fechaSalida.split('-')[0]));
+        let anios = Array.from(aniosSet).sort();
+        if(anios.length === 0) anios = [new Date().getFullYear().toString()];
+
+        if (tipo === 'mes') {
+            anios.forEach(anio => {
+                MESES.forEach((mes, idx) => {
+                    let mVal = (idx + 1).toString().padStart(2, '0');
+                    selectValor.innerHTML += `<option value="${anio}-${mVal}">${mes} ${anio}</option>`;
+                });
+            });
+        } else if (tipo === 'trimestre') { 
+            anios.forEach(anio => {
+                selectValor.innerHTML += `<option value="${anio}-Q1">I Trimestre ${anio} (Ene-Mar)</option>`;
+                selectValor.innerHTML += `<option value="${anio}-Q2">II Trimestre ${anio} (Abr-Jun)</option>`;
+                selectValor.innerHTML += `<option value="${anio}-Q3">III Trimestre ${anio} (Jul-Sep)</option>`;
+                selectValor.innerHTML += `<option value="${anio}-Q4">IV Trimestre ${anio} (Oct-Dic)</option>`;
+            });
+        } else if (tipo === 'semestre') {
+            anios.forEach(anio => {
+                selectValor.innerHTML += `<option value="${anio}-S1">I Semestre ${anio} (Ene-Jun)</option>`;
+                selectValor.innerHTML += `<option value="${anio}-S2">II Semestre ${anio} (Jul-Dic)</option>`;
+            });
+        } else if (tipo === 'anio') {
+            anios.forEach(anio => selectValor.innerHTML += `<option value="${anio}">Año Completo ${anio}</option>`);
+        }
+    }
+
+    function obtenerActividadesFiltradas() {
+        const tipo = document.getElementById('exportTipoFiltro').value;
+        const valor = document.getElementById('exportValorSeleccionado').value;
+        
+        return actividades.filter(act => {
+            const y = act.fechaSalida.split('-')[0];
+            const m = parseInt(act.fechaSalida.split('-')[1]);
+
+            if (tipo === 'mes') return act.fechaSalida.startsWith(valor);
+            if (tipo === 'anio') return y === valor;
+            if (tipo === 'trimestre') {
+                const anioTrim = valor.split('-')[0];
+                const trim = valor.split('-')[1];
+                if (y !== anioTrim) return false;
+                if (trim === 'Q1' && m >= 1 && m <= 3) return true;
+                if (trim === 'Q2' && m >= 4 && m <= 6) return true;
+                if (trim === 'Q3' && m >= 7 && m <= 9) return true;
+                if (trim === 'Q4' && m >= 10 && m <= 12) return true;
+            }
+            if (tipo === 'semestre') {
+                const anioSem = valor.split('-')[0];
+                const sem = valor.split('-')[1];
+                if (y !== anioSem) return false;
+                if (sem === 'S1' && m >= 1 && m <= 6) return true;
+                if (sem === 'S2' && m >= 7 && m <= 12) return true;
+            }
+            return false;
+        }).sort((a, b) => a.fechaSalida.localeCompare(b.fechaSalida));
+    }
+
+    function ejecutarExportacion(formato) {
+        const actsFiltradas = obtenerActividadesFiltradas();
+        if (actsFiltradas.length === 0) { alert("No hay actividades en el rango seleccionado."); return; }
+
+        const selectOpt = document.getElementById('exportValorSeleccionado');
+        const titulo = selectOpt.options[selectOpt.selectedIndex].text;
+
+        if (formato === 'txt') exportarTXT(actsFiltradas, titulo);
+        else if (formato === 'png') exportarPNGGeneral(actsFiltradas, titulo);
+        bsModalExportar.hide();
+    }
+
+    function exportarTXT(acts, titulo) {
+        let txt = `📅 *CALENDARIO - LA TRIBU DE LOS LIBRES*\n📌 *${titulo.toUpperCase()}*\n\n`;
+        let mesActual = "";
+        
+        acts.forEach(act => {
+            const [y, m] = act.fechaSalida.split('-');
+            const mesNombre = `${MESES[parseInt(m)-1]} ${y}`;
+            const esSuspendida = act.tipo === 'Suspendida';
+            
+            if (mesNombre !== mesActual) { txt += `\n🔸 *--- ${mesNombre.toUpperCase()} ---* 🔸\n\n`; mesActual = mesNombre; }
+
+            let tipo = act.tipo === 'Internacional' ? `${act.tipo} (${act.destinoInt})` : act.tipo;
+            
+            if(esSuspendida) {
+                txt += `🚫 *[SUSPENDIDA] ${act.nombre}*\n-----------------------------------\n`;
+            } else {
+                txt += `⛰️ *${act.nombre}*\n🥾 Tipo: ${tipo} | ⏱️ Días: ${act.dias}\n🚀 Salida: ${formatearFechaVista(act.fechaSalida)} a las ${act.horaSalida}\n`;
+                if (act.dias == 1) txt += `📍 Lugar: ${act.lugarSalida}\n`;
+                else txt += `🔙 Regreso: ${formatearFechaVista(act.fechaRegreso)} a las ${act.horaRegreso}\n`;
+                
+                txt += `💰 Precio: ${act.moneda}${act.precio} | 👥 Cap: ${act.capacidad}\n`;
+                
+                if (act.incluye && act.incluye.length > 0) {
+                    txt += `✅ Incluye: `;
+                    let incText = act.incluye.map(i => i === 'Otros' ? (act.otrosDesc || 'Otros') : i).join(', ');
+                    txt += `${incText}\n`;
+                }
+                txt += `-----------------------------------\n`;
+            }
+        });
+        txt += `\nHECHO CON ❤️ POR LA TRIBU DE LOS LIBRES\n`;
+
+        const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Calendario_${titulo.replace(/ /g, "_")}.txt`;
+        a.click();
+    }
+
+    function exportarPNGGeneral(acts, titulo) {
+        const contenedor = document.getElementById('exportContent');
+        contenedor.innerHTML = `<h4 class="text-center mb-4 text-dark" style="border-bottom: 2px solid #eee; padding-bottom: 10px;">${titulo.toUpperCase()}</h4>`;
+        
+        let mesActual = "";
+        let tableHTML = `<table style="width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 14px;">`;
+
+        acts.forEach(act => {
+            const [y, m] = act.fechaSalida.split('-');
+            const mesNombre = `${MESES[parseInt(m)-1]} ${y}`;
+            const esSuspendida = act.tipo === 'Suspendida';
+            
+            if (mesNombre !== mesActual) {
+                tableHTML += `<tr><td colspan="4" style="background:#fff9e6; color:#b58500; font-weight:bold; text-align:center; padding:10px; margin-top:15px; text-transform:uppercase;">${mesNombre}</td></tr>`;
+                mesActual = mesNombre;
+            }
+            
+            let tipo = act.tipo === 'Internacional' ? `${act.tipo} (${act.destinoInt})` : act.tipo;
+            if (esSuspendida) tipo = `<span style="color: #dc3545; font-weight: bold;">SUSPENDIDA</span>`;
+            
+            let nombreEstilo = esSuspendida ? `text-decoration: line-through; color: #dc3545;` : `color: #d39e00;`;
+
+            tableHTML += `
+                <tr>
+                    <td style="padding:10px; border-bottom:1px solid #eee; font-weight:bold; ${nombreEstilo}">${act.nombre} <br><span style="font-size:11px; color:#888; text-decoration: none; font-weight:normal;">${act.dias} Día(s)</span></td>
+                    <td style="padding:10px; border-bottom:1px solid #eee; color:#555;">${tipo}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee; color:#555;">${formatearFechaVista(act.fechaSalida)}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee; color:#198754; font-weight:bold;">${act.moneda}${act.precio}</td>
+                </tr>
+            `;
+        });
+        tableHTML += `</table>`; contenedor.innerHTML += tableHTML;
+
+        document.body.style.cursor = 'wait';
+        const exportNode = document.getElementById('exportContainer');
+        exportNode.style.left = '0'; exportNode.style.zIndex = '-1';
+
+        html2canvas(exportNode, { backgroundColor: '#f4f7f6', scale: 2 }).then(canvas => {
+            exportNode.style.left = '-9999px'; document.body.style.cursor = 'default';
+            const a = document.createElement('a'); a.href = canvas.toDataURL("image/png");
+            a.download = `Calendario_${titulo.replace(/ /g, "_")}.png`; a.click();
+        });
+    }
+
+    // --- JSON BACKUP (FORMATO dd/mm/año dinámico) ---
+    function exportarJSON() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(actividades, null, 2));
+        const dlAnchorElem = document.createElement('a');
+        dlAnchorElem.setAttribute("href", dataStr);
+        
+        // Formato ddmmyy
+        const d = new Date();
+        const dia = String(d.getDate()).padStart(2, '0');
+        const mes = String(d.getMonth() + 1).padStart(2, '0');
+        const anio = String(d.getFullYear()).slice(-2);
+        
+        dlAnchorElem.setAttribute("download", `calendario_${dia}${mes}${anio}.json`);
+        dlAnchorElem.click();
+    }
+    
+    function importarJSON(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                if(Array.isArray(json)) {
+                    if(confirm("Esto reemplazará todo tu calendario actual. ¿Continuar?")) reemplazarDBCompleta(json);
+                } else alert("Formato de archivo inválido.");
+            } catch (err) { alert("Error al leer el archivo JSON."); }
+        };
+        reader.readAsText(file); event.target.value = ''; 
+    }
+</script>
+
+<!-- API Database y Navegación -->
+<script src="js/api_db.js"></script>
+<script src="js/navigation.js"></script>
+</body>
+</html>
