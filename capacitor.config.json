@@ -1,6 +1,6 @@
 {
-  "appId": "com.altair.app",
-  "appName": "Altair",
+  "appId": "com.altamira.app",
+  "appName": "altamira",
   "webDir": "www",
   "bundledWebRuntime": false
 }
